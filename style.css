@@ -1,0 +1,19 @@
+html, body { margin: 0; overflow: hidden; }
+#map { position: fixed; inset: 0; }                 /* fixed, so mobile toolbar resizing can't scroll the page */
+#recentre {
+  position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 1000;
+  width: 48px; height: 48px; border-radius: 50%; border: 0; background: #fff; font-size: 24px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); display: none;
+}
+#status {
+  position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right));
+  top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
+  padding: 8px 12px; border-radius: 8px; background: #fff; font: 14px system-ui, sans-serif;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); pointer-events: none;
+}
+#status:empty { opacity: 0; }                       /* stays in the page so screen readers announce text changes */
+.leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
+#debug {
+  position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom)); z-index: 1000;
+  padding: 2px 8px; border-radius: 4px; background: #d33; color: #fff; font: 12px system-ui, sans-serif; pointer-events: none;
+}
