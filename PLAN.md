@@ -58,7 +58,7 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 - `?debug` mode: tap anywhere and the dot *walks* there at walking speed (×10 option). It goes through the same update function as real GPS, so it tests exactly the live path.
 - Check: the debug walk works on the laptop (`npx serve`, localhost); on the phone, the Pages URL shows your real dot moving.
 
-**2. Fog**
+**2. Fog** ✅ built, awaiting your check
 - `src/fog.js` (+ `src/fogLayer.js`): a grid of 0.0001° cells (about 11 m) and a 40 m reveal radius (adjustable). Reveal along the line between GPS readings so the trail has no gaps; skip that for jumps over 200 m. Ignore readings with accuracy worse than 50 m (adjustable).
 - Accuracy gate goes in `main.js` routing, not in `fog.js`: the dot shows every fix (a big ring is honest), but only fixes ≤ `MAX_ACCURACY` reach the fog. Fixes the dot shows but fog ignores: coarse Wi-Fi/IP first fixes, tunnel drift.
 - `me.js` dot and ring move into their own `player` pane above the fog. Today they sit in Leaflet's default overlay pane (z 400), which the fog pane (z 450) would cover.
@@ -66,12 +66,15 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 - Check: `node tests/fog.test.mjs` passes, the debug walk leaves a cleared trail, and a real walk clears fog.
 
 **3. Saved progress**
+- `src/storage.js` calls `fogLayer.snapshot()` (numeric keys) to save and `fogLayer.load(keys)` to restore; `load` redraws, so a reload shows progress immediately. Save when `reveal` adds cells (add an `onChange` hook to `fogLayer` then, not before). Store `CELL` with the data: keys only mean the same cells if `CELL` is unchanged, so a different `CELL` discards or converts the saved set.
 - Revealed cells are saved to `localStorage` as JSON when new cells are added. A reload keeps progress. Debug mode gets a reset button.
 - Debug walks save under a separate key (e.g. `fog:debug`), so tapping around on the laptop or phone never mixes fake trails into your real walked progress.
 - Check: walk, reload, the fog stays cleared.
 
 **4. Discover places**
 - `tools/fetch-places.mjs`: one Overpass query for named `amenity|shop|leisure|tourism|historic` places within 2 km of SUTD, trimmed to `{name, type, lat, lng}`.
+- `revealPath`/`reveal` only return a count today. Phase 4 changes them to return the newly cleared keys, which is what "Found: <name>" needs.
+- Place markers sit in Leaflet's marker pane, which is *above* the fog pane, so the fog does not hide them: hide them in code (`isRevealed`) and show them when their cell clears.
 - Places stay hidden while their cell is under fog. When a cell first clears, a small toast shows "Found: <name>" with a short vibration. Tap a place pin to see its name.
 - The HUD shows % of the 2 km area explored and the number of places found.
 - Check: a debug walk past a known place (e.g. a hawker centre near SUTD) makes it pop up.
@@ -90,6 +93,7 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
   │ [Found: Changi Village…]  ⊕ │ ← toast, recentre
   └──────────────────────┘
   ```
+- Fog look (all deliberately plain in Phase 2): fog opacity is 0.9, so the map is faintly visible underneath, including street names. Decide whether unexplored streets should be hidden fully. The cleared edge is scalloped (cell-sized bumps). Add more feather or a blur. The canvas is CSS-pixel resolution, so on 2x/3x phone screens use `devicePixelRatio` for a crisp edge (the canvas is already padded to 4x area, so check redraw cost).
 - Stale-GPS cue: dim the dot when no fix has arrived for ~30 s (tunnels, covered walkways), so a frozen dot isn't mistaken for live.
 - Check: screenshots on the laptop plus a look on the phone outdoors.
 
@@ -100,6 +104,8 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 ## Known limits (stated, not solved)
 - Mobile browsers pause GPS when the screen locks, so the screen has to stay on while walking. Background tracking is out of scope.
 - The standard OSM tile servers are fine for light MVP use. Switch tile provider if usage grows.
+- Fog redraw scans every cell in the padded view: ~15k lookups at the default zoom, ~200k at the zoom-15 limit. If it stutters on an old phone, iterate the cleared cells instead of the grid.
+- Interpolation between fixes is skipped when the gap was covered faster than 3 m/s, or is over 200 m, so riding a bus doesn't clear a corridor between two fixes. The fixes themselves still clear around them.
 - `localStorage` holds about 400k cells. Move to IndexedDB if that's ever reached.
 - Privacy wording: walked history never leaves the phone, but map tiles come from OSM and Leaflet from unpkg, so those servers see roughly which area is on screen. The "why open" write-up should say exactly that. Self-hosting Leaflet would also let the app start offline.
 - Deploys: GitHub Pages caches files ~10 min, so right after a push a phone can mix old and new modules. If the page says "Something went wrong loading the app", hard-refresh (or open a private tab).

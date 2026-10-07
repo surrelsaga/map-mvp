@@ -3,8 +3,8 @@ import { SUTD } from './config.js';
 import { map } from './map.js';
 import { showRecentre, onRecentre } from './ui.js';
 
-const ring = L.circle(SUTD, { radius: 0, weight: 1, color: '#2a7de1', fillOpacity: 0.1, interactive: false });
-const dot = L.circleMarker(SUTD, { radius: 8, weight: 3, color: '#fff', fillColor: '#2a7de1', fillOpacity: 1, interactive: false });
+const ring = L.circle(SUTD, { pane: 'player', radius: 0, weight: 1, color: '#2a7de1', fillOpacity: 0.1, interactive: false });
+const dot = L.circleMarker(SUTD, { pane: 'player', radius: 8, weight: 3, color: '#fff', fillColor: '#2a7de1', fillOpacity: 1, interactive: false });
 let me = null;          // last fix {lat, lng, accuracy}; null until the first one
 let following = true;
 
