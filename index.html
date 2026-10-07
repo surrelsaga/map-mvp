@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fog Walk</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  html, body { margin: 0; overflow: hidden; }
+  #map { position: fixed; inset: 0; }                 /* fixed, so mobile toolbar resizing can't scroll the page */
+  #recentre {
+    position: fixed; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: 0; background: #fff; font-size: 24px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.35); display: none;
+  }
+  #status {
+    position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right));
+    top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
+    padding: 8px 12px; border-radius: 8px; background: #fff; font: 14px system-ui, sans-serif;
+    box-shadow: 0 1px 6px rgba(0,0,0,.35); pointer-events: none;
+  }
+  #status:empty { opacity: 0; }                       /* stays in the page so screen readers announce text changes */
+  .leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
+  #debug {
+    position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom)); z-index: 1000;
+    padding: 2px 8px; border-radius: 4px; background: #d33; color: #fff; font: 12px system-ui, sans-serif; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="status" role="status"></div>
+<button id="recentre" aria-label="Centre on me">⊕</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+if (!window.L) throw (document.getElementById('status').textContent = 'Couldn’t load the map. Check your connection and reload.');
+const SUTD = [1.3413, 103.9638];
+const WALK_SPEED = 1.4;                       // m/s, debug walking pace
+const debug = new URLSearchParams(location.search).get('debug');  // ?debug or ?debug=10 (speed multiplier)
+
+const map = L.map('map', { zoomControl: false }).setView(SUTD, 17);
+map.attributionControl.setPosition('bottomleft');   // keep the OSM credit clear of the recentre button
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+
+const ring = L.circle(SUTD, { radius: 0, weight: 1, color: '#2a7de1', fillOpacity: 0.1, interactive: false });
+const dot = L.circleMarker(SUTD, { radius: 8, weight: 3, color: '#fff', fillColor: '#2a7de1', fillOpacity: 1, interactive: false });
+let me = null;          // last fix {lat, lng, accuracy}; null until the first one
+let following = true;
+
+const recentre = document.getElementById('recentre');
+const status = document.getElementById('status');
+const say = (msg) => { status.textContent = msg; };
+
+// Every position, real GPS or debug walk, comes through here.
+function onFix({ lat, lng, accuracy }) {
+  const first = !me;
+  me = { lat, lng, accuracy };
+  ring.setLatLng(me).setRadius(accuracy);
+  dot.setLatLng(me);
+  say('');
+  if (first) { ring.addTo(map); dot.addTo(map); }
+  if (following) map.panTo(me);                       // keeps the user's zoom; a map they dragged away stays put
+}
+
+map.on('dragstart', () => { following = false; recentre.style.display = 'block'; });
+recentre.onclick = () => { following = true; recentre.style.display = 'none'; if (me) map.panTo(me); };
+
+if (debug === null) {
+  say('Finding you…');
+  navigator.geolocation
+    ? navigator.geolocation.watchPosition(
+        (p) => onFix({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+        (e) => {
+          if (e.code === e.PERMISSION_DENIED) say(isSecureContext ? 'Location is blocked. Allow it in your browser settings and reload.' : 'Location needs a secure page (https or localhost).');
+          else if (!me) say('Can’t get your location yet…');   // after a first fix, a missed update isn't worth a message
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 })
+    : say('This browser can’t share your location.');
+} else {
+  // Debug walk: tap the map and the dot walks there at walking pace.
+  const speed = WALK_SPEED * (Math.abs(Number(debug)) || 1);
+  let target = null, last = performance.now();
+  document.body.insertAdjacentHTML('beforeend', '<div id="debug">DEBUG: tap to walk</div>');   // so a simulated position is never mistaken for GPS
+  onFix({ lat: SUTD[0], lng: SUTD[1], accuracy: 10 });
+  map.on('click', (e) => { target = e.latlng; });
+  setInterval(() => {
+    const now = performance.now(), dt = (now - last) / 1000; last = now;   // real elapsed time, so throttled tabs don't slow the walk
+    if (!target) return;
+    const d = map.distance(me, target), step = speed * dt;
+    const f = d ? Math.min(1, step / d) : 1;
+    onFix({ lat: me.lat + (target.lat - me.lat) * f, lng: me.lng + (target.lng - me.lng) * f, accuracy: 10 });
+    if (f === 1) target = null;
+  }, 500);
+}
+</script>
+</body>
+</html>
