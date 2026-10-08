@@ -1,9 +1,11 @@
 // Position source #2: tap the map and the dot walks there at walking pace. Test without leaving the desk.
-import { SUTD, WALK_SPEED, DEBUG_TICK_MS, DEBUG_ACCURACY } from './config.js';
+import type L from 'leaflet';
+import { SUTD, WALK_SPEED, DEBUG_TICK_MS, DEBUG_ACCURACY } from './config.ts';
+import type { Fix } from './types.ts';
 
-export function startDebugWalk(map, where, onFix, multiplier) {
+export function startDebugWalk(map: L.Map, where: () => Fix | null, onFix: (fix: Fix) => void, multiplier: number) {
   const speed = WALK_SPEED * (Math.abs(multiplier) || 1);
-  let target = null, last = performance.now();
+  let target: L.LatLng | null = null, last = performance.now();
   onFix({ lat: SUTD[0], lng: SUTD[1], accuracy: DEBUG_ACCURACY });
   map.on('click', (e) => { target = e.latlng; });
   setInterval(() => {

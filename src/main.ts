@@ -1,14 +1,15 @@
 // The only file that knows every module. To add a feature: write a module, then wire it into onFix or the startup below.
-import { map } from './map.js';
-import * as me from './me.js';
-import { say, showDebugBadge } from './ui.js';
-import { startGps } from './gps.js';
-import { startDebugWalk } from './debugWalk.js';
-import * as fogLayer from './fogLayer.js';
-import { MAX_ACCURACY } from './config.js';
+import { map } from './map.ts';
+import * as me from './me.ts';
+import { say, showDebugBadge } from './ui.ts';
+import { startGps } from './gps.ts';
+import { startDebugWalk } from './debugWalk.ts';
+import * as fogLayer from './fogLayer.ts';
+import { MAX_ACCURACY } from './config.ts';
+import type { Fix } from './types.ts';
 
 // Every position, real GPS or debug walk, comes through here.
-function onFix(fix) {
+function onFix(fix: Fix) {
   say('');
   me.update(fix);                                    // the dot shows every fix, even a rough one
   if (fix.accuracy <= MAX_ACCURACY) fogLayer.reveal(fix);   // but only a trustworthy fix clears fog
@@ -24,4 +25,12 @@ if (debug === null) {
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 
+interface FogMapApi {
+  map: typeof map;
+  where: typeof me.where;
+  isRevealed: typeof fogLayer.isRevealed;
+  snapshot: typeof fogLayer.snapshot;
+  load: typeof fogLayer.load;
+}
+declare global { interface Window { fogMap: FogMapApi } }
 window.fogMap = { map, where: me.where, isRevealed: fogLayer.isRevealed, snapshot: fogLayer.snapshot, load: fogLayer.load };   // handle for tests now (not a security boundary: all of this runs on the user's own device); the quest interface later

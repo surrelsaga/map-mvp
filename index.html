@@ -4,24 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fog Walk</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:,">
+<link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
 <div id="map"></div>
 <div id="status" role="status"></div>
 <button id="recentre" aria-label="Centre on me">⊕</button>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
-// Safety net: if Leaflet or any module fails to load or run, say so instead of leaving a blank page.
-const oops = (msg) => { const s = document.getElementById('status'); s.textContent = s.textContent || msg; };
-if (!window.L) oops('Couldn’t load the map. Check your connection and reload.');
-addEventListener('error', (e) => { if (e.target === window || e.target.tagName === 'SCRIPT') oops('Something went wrong loading the app. Reload to try again.'); }, true);
+// Safety net: if the app script fails to load or run, say so instead of leaving a blank page.
+addEventListener('error', (e) => {
+  const s = document.getElementById('status');
+  if (s && !s.textContent && (e.target === window || e.target.tagName === 'SCRIPT')) s.textContent = 'Something went wrong loading the app. Reload to try again.';
+}, true);
 </script>
-<script type="module" src="src/main.js"></script>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

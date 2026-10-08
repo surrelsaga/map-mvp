@@ -28,6 +28,9 @@ Side quests are tied to real places, so the map must be able to answer:
 - Place data comes from OpenStreetMap, so use an OSM-based map stack (open tiles, no closed map API as the core).
 - Location data is sensitive, so store it locally only.
 
+## Stack (decided)
+Web app, Leaflet + OSM tiles, fog as grid cells on a canvas overlay, localStorage, a click-to-walk `?debug` mode. Vite + TypeScript, deployed to GitHub Pages by Actions. Run it with `npm install && npm run dev`. Architecture and build phases are in `PLAN.md`.
+
 ## Open decisions (plan here)
 - Web app vs native/PWA. GPS and "walking with the phone" favour a PWA.
 - Map library (e.g. Leaflet or MapLibre) and tile source.

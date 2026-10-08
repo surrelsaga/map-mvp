@@ -1,16 +1,18 @@
 // "Where am I": the player's dot, accuracy ring, last fix, and camera-follow state.
-import { SUTD } from './config.js';
-import { map } from './map.js';
-import { showRecentre, onRecentre } from './ui.js';
+import L from 'leaflet';
+import { SUTD } from './config.ts';
+import { map } from './map.ts';
+import { showRecentre, onRecentre } from './ui.ts';
+import type { Fix } from './types.ts';
 
 const ring = L.circle(SUTD, { pane: 'player', radius: 0, weight: 1, color: '#2a7de1', fillOpacity: 0.1, interactive: false });
 const dot = L.circleMarker(SUTD, { pane: 'player', radius: 8, weight: 3, color: '#fff', fillColor: '#2a7de1', fillOpacity: 1, interactive: false });
-let me = null;          // last fix {lat, lng, accuracy}; null until the first one
+let me: Fix | null = null;          // last fix; null until the first one
 let following = true;
 
-export const where = () => me && { ...me };           // a copy, so callers can't edit the player's state
+export const where = (): Fix | null => me && { ...me };           // a copy, so callers can't edit the player's state
 
-export function update({ lat, lng, accuracy }) {
+export function update({ lat, lng, accuracy }: Fix) {
   const first = !me;
   me = { lat, lng, accuracy };
   ring.setLatLng(me).setRadius(accuracy);

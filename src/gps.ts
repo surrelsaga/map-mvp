@@ -1,8 +1,9 @@
 // Position source #1: the device's GPS. Same shape as debugWalk: start(...) then call onFix({lat, lng, accuracy}).
-import { GPS_OPTIONS } from './config.js';
+import { GPS_OPTIONS } from './config.ts';
+import type { Fix } from './types.ts';
 
 // onProblem(message, persistent): persistent problems (blocked, unsupported) always matter; transient ones only before the first fix.
-export function startGps(onFix, onProblem) {
+export function startGps(onFix: (fix: Fix) => void, onProblem: (message: string, persistent: boolean) => void) {
   if (!navigator.geolocation) return onProblem('This browser can’t share your location.', true);
   navigator.geolocation.watchPosition(
     (p) => onFix({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
