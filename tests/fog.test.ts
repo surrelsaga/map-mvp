@@ -73,4 +73,7 @@ assert(isRevealed(fast, ...ll(east(a, 150))), 'but the end point still clears');
 const noT = new Set<number>(); revealPath(noT, a, east(a, 150));
 assert(isRevealed(noT, ...ll(east(a, 75))), 'fixes without timestamps still interpolate');
 
+// golden: saved progress is stored as these numbers, so key() or the grid must never change without bumping STORE_KEY in config.ts
+assert.equal(key(...cellOf(1.3413, 103.9638)), 48284266462, 'cell key for SUTD is stable (bump STORE_KEY if this changes on purpose)');
+
 console.log('ok');

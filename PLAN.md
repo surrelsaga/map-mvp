@@ -23,14 +23,15 @@ src/
   debugWalk.ts      position source #2: tap-to-walk                       ✅ phase 1
   fog.ts            PURE logic: grid cells, distance, reveal, isRevealed (no DOM, no Leaflet, Node-testable)   phase 2
   fogLayer.ts       canvas overlay that draws the fog from fog.ts state   phase 2
-  storage.ts        save/load revealed cells (localStorage)               phase 3
+  storage.ts        save/load revealed cells (localStorage), debounced saver   ✅ phase 3
   places.ts         load places.json, hide/show by fog, "Found" toasts    phase 4
   hud.ts            % explored + places-found display                     phase 4/5
   api.ts            window.fogMap quest interface                         phase 6
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  slim list `{name, type, lat, lng}` (committed)         phase 4
 tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
-tests/fog.test.ts  plain `node:assert` checks for src/fog.ts (Node 24 runs the TypeScript directly)
+tests/fog.test.ts, storage.test.ts  plain `node:assert` checks for src/fog.ts and the pure half of src/storage.ts (Node 24 runs the TypeScript directly)
+tests/browser.mjs   dev-only headless-Chrome regression suite (`npm run test:browser`, puppeteer-core); not part of `npm test` or CI
 ```
 
 Rules:
@@ -43,7 +44,7 @@ Rules:
 ## How each phase runs
 The MVP is a chain of separate pieces. Each piece goes through this loop before the next one starts:
 1. **Build**: only that phase's piece.
-2. **Test**: `npm test` if the phase touches `src/fog.ts`, `npm run typecheck`, then run it in the browser (`npm run dev`, `?debug` walk) and take a screenshot. A phase that changes the build is also checked against `npm run build` + `npm run preview`.
+2. **Test**: `npm test`, `npm run typecheck`, then `npm run test:browser` against `npm run dev` (it covers every earlier phase too, so it is the regression check). Take a screenshot for visual changes. A phase that changes the build is also checked against `npm run build` + `npm run preview`.
 3. **Review**: run the `code-review` skill (correctness) and the `ponytail-review` skill (over-engineering) on the changes, then fix what they find and test again.
 4. **Your check**: you try it on the laptop or phone and say go.
 5. **Commit + push to Pages**, then start the next phase.
@@ -70,11 +71,15 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 
 **2.5 Vite + TypeScript** ✅ built, awaiting your check. A pure move (no feature changes): tooling, types, README, Actions deploy.
 
-**3. Saved progress**
-- `src/storage.ts` calls `fogLayer.snapshot()` (numeric keys) to save and `fogLayer.load(keys)` to restore; `load` redraws, so a reload shows progress immediately. Save when `reveal` adds cells (add an `onChange` hook to `fogLayer` then, not before). Store `CELL` with the data: keys only mean the same cells if `CELL` is unchanged, so a different `CELL` discards or converts the saved set.
-- Revealed cells are saved to `localStorage` as JSON when new cells are added. A reload keeps progress. Debug mode gets a reset button.
-- Debug walks save under a separate key (e.g. `fog:debug`), so tapping around on the laptop or phone never mixes fake trails into your real walked progress.
-- Check: walk, reload, the fog stays cleared.
+**3. Saved progress** ✅ built, awaiting your check
+- `src/storage.ts`: pure `encode`/`decode` (Node-tested, validates everything read back), `localStorage` wrappers that never throw, and a debounced saver. The stored value is `{ keys: number[] }`.
+- The storage key carries the format version and the grid size: `fogwalk:v1:<CELL>` (plus `:debug` for simulated walks). Changing `CELL` or bumping `STORE_KEY` therefore never overwrites old progress: it stays in storage under its own key, ready for a migration. A golden test pins `key()` for SUTD, so changing the grid without bumping `STORE_KEY` fails `npm test`.
+- `main.ts` restores with `fogLayer.load(storage.readFog(key))` before the first fix, and calls `saver.schedule()` whenever `reveal` clears new cells. No change hook was needed in `fogLayer`: `reveal` already returns the count.
+- Writes happen at most every 2 s (`SAVE_DELAY_MS`), and immediately when the page is hidden or closed (`pagehide` / `visibilitychange`), because phones kill backgrounded pages without warning.
+- Each write is merged with what is already stored, so a second tab holding older cells can't wipe newer ones. A failed write (quota, blocked) leaves the data marked unsaved and is retried on the next cleared cell or hide/close.
+- The debug badge has a **reset fog** button: it stops the saver for good, clears the debug key and reloads.
+- Not done: no on-screen notice when saving fails (console warning only; the Phase 5 HUD is the place for one); `navigator.storage.persist()` isn't requested, so Safari may evict data after ~7 idle days if the page isn't installed to the home screen.
+- Check: walk, reload, the fog stays cleared (also covered by `npm run test:browser`).
 
 **4. Discover places**
 - Output goes to `public/places.json` (Vite only ships what is imported or in `public/`), fetched at runtime via `import.meta.env.BASE_URL + 'places.json'`, so it works under `/map-mvp/`. Moved there from the repo-root `data/` path in the module map above.
@@ -113,7 +118,8 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 - The standard OSM tile servers are fine for light MVP use. Switch tile provider if usage grows.
 - Fog redraw scans every cell in the padded view: ~15k lookups at the default zoom, ~200k at the zoom-15 limit. If it stutters on an old phone, iterate the cleared cells instead of the grid.
 - Interpolation between fixes is skipped when the gap was covered faster than 3 m/s, or is over 200 m, so riding a bus doesn't clear a corridor between two fixes. The fixes themselves still clear around them.
-- `localStorage` holds about 400k cells. Move to IndexedDB if that's ever reached.
+- `localStorage` holds about 400k cells (~12 bytes each). Move to IndexedDB if that's ever reached.
+- Two tabs open at once: saves are merged, so nothing is lost, but each tab only shows its own cells until it reloads.
 - Privacy wording: walked history never leaves the phone, but the map tiles come from OSM, so that server sees roughly which area is on screen. The "why open" write-up should say exactly that. Leaflet is bundled into the app, so the app itself starts offline (the tiles still need a network).
 - Deploys: every push to `main` runs the Pages workflow (needs repo Settings → Pages → Source: GitHub Actions). Built files have content hashes in their names, so a phone never mixes old and new code. If the page says "Something went wrong loading the app", reload.
 - `index.html` can't be opened by double-click (browsers block ES modules on `file://`, and the source is TypeScript). Run `npm run dev`.

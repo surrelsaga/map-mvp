@@ -16,3 +16,7 @@ export const ROUGH_HINT_DELAY = 5000;     // ms without a precise fix before the
 export const MAX_ACCURACY = 50;           // metres: fixes worse than this show the dot but don't clear fog
 export const MAX_SPEED = 3;               // m/s: a gap between fixes covered faster than this (bus, lift, GPS lost) isn't walked, so nothing is cleared across it
 export const MAX_JUMP = 200;              // metres: a bigger gap between fixes (glitch, debug teleport) isn't walked, only the end point clears
+
+// Saved progress
+export const SAVE_DELAY_MS = 2000;        // newly cleared cells are written to storage at most this often (also flushed when the page is hidden)
+export const STORE_KEY = 'fogwalk:v1';    // bump the version when the stored format or the grid (fog.key) changes; storage.ts adds CELL, and ':debug' in debug mode
