@@ -8,7 +8,7 @@ const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
 
 export interface Stats {
-  goal: Goal;
+  goal: Goal; daily: Goal;                                              // goal = what the chip shows (a quest's, or the daily one when there is none); daily = today's count
   found: number; total: number;
   groups: Record<Group, { found: number; total: number }>;
   percent: string; fraction: number;                                    // how much of the neighbourhood is explored: "0.10%" and 0.001
@@ -29,16 +29,19 @@ function setRing(svg: Element, goal: Goal) {
 
 let lastPlace: Place | null = null;
 
-// The chip and the goal ring: all that a new day changes.
-export function showGoal(goal: Goal) {
+// The chip and the goal ring: all that a new day changes. While a quest holds the chip, the card keeps today's count on a line of its own.
+export function showGoal(goal: Goal, daily: Goal) {
   $('chipText').textContent = goal.label;
   $('chip').setAttribute('aria-label', `${goal.label}, progress details`);   // contains the visible text, and stays the same open or closed
   for (const ring of document.querySelectorAll('#top .ring')) setRing(ring, goal);
-  $('goalText').textContent = goal.done ? 'All done. More finds are a bonus.' : `${goal.found} of ${goal.target} new places, ${goal.target - goal.found} to go`;
+  $('goalTitle').textContent = goal.title;
+  $('goalText').textContent = goal.detail;
+  $('todayLine').hidden = goal === daily;
+  $('todayLine').textContent = `Today: ${daily.found} of ${daily.target} places`;
 }
 
-export function showStats({ goal, found, total, groups, percent, fraction, last }: Stats) {
-  showGoal(goal);
+export function showStats({ goal, daily, found, total, groups, percent, fraction, last }: Stats) {
+  showGoal(goal, daily);
   $('statsPlaces').textContent = total ? `${found} of ${total} places found` : `${found} places found`;
   for (const g of GROUPS) {
     const li = document.querySelector(`#groups li[data-group="${g}"]`)!;

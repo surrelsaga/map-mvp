@@ -24,6 +24,8 @@ Side quests are tied to real places, so the map must be able to answer:
 - Did the user reach point P? (GPS-based completion check)
 - Show a marker at P (quest location).
 
+How quests actually hook in (Phase 6, `PLAN.md`): through `discovery.ts` and its goal slot, with "reached" being the same rule as "found". No separate quest API.
+
 ## Already known
 - Place data comes from OpenStreetMap, so use an OSM-based map stack (open tiles, no closed map API as the core).
 - Location data is sensitive, so store it locally only.

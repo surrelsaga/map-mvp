@@ -65,6 +65,8 @@ html, body { margin: 0; overflow: hidden; }
 #stats p { margin: 0; }
 .goal { display: flex; align-items: center; gap: 14px; }
 #goalTitle { font-size: 20px; font-weight: 700; }
+#stats #todayLine { margin-top: 12px; color: var(--dusk); }
+#stats #todayLine[hidden] { display: none; }
 #goalText { color: var(--dusk); }
 .block { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(147, 163, 186, 0.25); }
 #stats #statsPlaces { margin-bottom: 12px; font-weight: 700; }   /* the id is repeated: `#stats p` would otherwise win and zero the margin */
@@ -129,6 +131,13 @@ html, body { margin: 0; overflow: hidden; }
   0% { transform: scale(0.6); box-shadow: 0 0 0 0 rgba(242, 179, 61, 0.8); }
   35% { transform: scale(1.25); }
   100% { transform: scale(1); box-shadow: 0 0 0 22px rgba(242, 179, 61, 0); }
+}
+
+/* the quest spot: a light disc with a dark flag, so it is never confused with a gold discovery */
+.quest-pin { display: grid; place-items: center; }
+.quest-disc {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; box-sizing: border-box;
+  background: var(--daylight); color: var(--panel); border: 2px solid var(--panel); box-shadow: 0 0 0 3px rgba(238, 243, 248, 0.35);
 }
 
 /* Leaflet's own pieces, restyled to match (the selectors are deliberately as specific as Leaflet's) */

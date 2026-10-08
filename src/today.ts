@@ -1,9 +1,9 @@
 // Today's goal: how many new places have been found today. The pure helpers need no browser; the small store keeps the count on this device.
-// The chip's ring shows exactly one goal. For now it is this one; quests will later take over the same slot with a goal of their own.
+// The chip's ring shows exactly one goal: a quest's when one is active (quests.ts builds a Goal too), else this one.
 import { DAILY_GOAL, TODAY_KEY } from './config.ts';
 
 export interface Today { date: string; ids: string[] }              // which places were found today (by key), so the same place can never count twice
-export interface Goal { found: number; target: number; done: boolean; progress: number; label: string }
+export interface Goal { title: string; found: number; target: number; done: boolean; progress: number; label: string; detail: string }   // label = the chip's text, detail = the line in the card
 
 // The phone's local date, "2026-10-09": the goal resets when it changes.
 export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -24,9 +24,10 @@ export function countToday(now: Date, add: string[], ...saved: unknown[]): Today
 export function goalOf(found: number, target: number = DAILY_GOAL): Goal {
   const done = found >= target;
   return {
-    found, target, done,
+    title: 'Today', found, target, done,
     progress: Math.min(1, found / target),
     label: done ? 'Today’s goal done' : found === 0 ? `Find ${target} places today` : `${found} of ${target} places today`,
+    detail: done ? 'All done. More finds are a bonus.' : `${found} of ${target} new places, ${target - found} to go`,
   };
 }
 

@@ -33,7 +33,9 @@ src/
   flags.ts          a remembered yes/no (hint dismissed)   ✅ phase 5b
   icons.ts          pin icons shared by the map and the stats card   ✅ phase 5b
   sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
-  api.ts            window.fogMap quest interface                         phase 6
+  quests.ts         PURE + store: the two test quests (reach, find), next-quest pick, progress, the quest's goal   ✅ phase 6
+  questLayer.ts     the quest marker (Leaflet divIcon in the `quest` pane)   ✅ phase 6
+                    (no api.ts: quests plug into discovery.ts and its goal slot, so no outside interface is needed)
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
 tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
@@ -46,7 +48,7 @@ Rules:
 - `fog.ts` never touches the DOM or Leaflet. Anything that draws goes in a `*Layer.ts` or `ui.ts`/`hud.ts`.
 - A module reads shared state through a small exported function (e.g. `me.where()`), not by reaching into another module's variables.
 - Behaviour constants (start point, zoom, tile URL, GPS options, thresholds, radii) live in `config.ts`, not inline. Pure styling stays in `style.css` or the layer that draws it.
-- `window.fogMap` (set in `main.ts`) is the one handle outside code (tests, later the quests) uses.
+- `window.fogMap` (set in `main.ts`) is the one handle outside code (the browser tests) uses. Quests are inside the app, so they don't go through it.
 
 ## How each phase runs
 The MVP is a chain of separate pieces. Each piece goes through this loop before the next one starts:
@@ -170,10 +172,117 @@ The main goal is still a working map that tracks your discoveries. This makes th
 - **Tests:** `tests/today.test.ts` and per-group counts in `tests/places.test.ts` (Node), plus a Phase 5b section in `tests/browser.mjs`. Each behaviour was checked by breaking it on purpose.
 - Commit message: `feat: daily goal ring and visual stats card`
 
-**6. Quest interface (later, once quests are decided)**
-- `src/api.ts` grows the `window.fogMap` handle (already `{ map, where }`) into `{ where(), isRevealed(lat,lng), reached(lat,lng,m), marker(lat,lng,label) }`. It's a thin wrapper over phase 1–4 modules, so it doesn't steer the earlier phases. Give `window.fogMap` its public type here (it is already typed as `FogMapApi` in `main.ts`).
-- Quest markers: bundled Leaflet can't find its default marker icon, so a plain `L.marker` shows a broken image. Use `L.divIcon` (no image files) or set `L.Icon.Default.mergeOptions` with the icons imported from `leaflet/dist/images/`.
-- Before quests trust `reached()`, limit `?debug` to localhost (today any visitor can add `?debug` to the Pages URL and tap to any spot).
+**6. Simple quests (no AI)** ✅ built, awaiting your check. Branch `feat/add-simple-no-ai-related-side-quests`.
+The point is to test whether a quest system sits on the map cleanly, before the open model writes quests (that design lives in `../walking-maxxing`). Two quests, made by code, no AI.
+
+What the map already gives quests, so no new map API is needed:
+- Every place in `places.json` has a stable OpenStreetMap id (`placeKey`).
+- `discovery.ts` has one goal slot, `currentGoal()`, which the chip and both rings render.
+- `discovery.check()` knows every new find and already adds a detail line to the toast when the goal completes. The same path carries "Quest done", so a quest never needs a second toast.
+- The finding to record: the earlier idea of an `api.ts` with `where / isRevealed / reached / marker` isn't needed. Quests plug into `discovery.ts` and the goal slot, and "reached" is the same rule as "found".
+
+The quests (they alternate: reach, find, reach, find…):
+- **Reach**:
+  - Target: a place not yet found, 150–400 m from you. If none is in that band, the nearest unfound place.
+  - A quest marker shows the spot through the fog. The name stays hidden until you get there.
+  - Done when that place is found, i.e. its cell clears as you arrive (~40 m). There's no separate arrival radius.
+  - Chip: "Reach the marked spot, 240 m" (rounded to 10 m). Ring progress is 1 − distance now / distance at start.
+- **Find**:
+  - "Find 2 new places".
+  - Counts announced finds since the quest started, remembered by place id (like `today.ts`), so a reload or a second tab can't count a place twice.
+  - Chip: "1 of 2 new places".
+- **On completion**:
+  - The find toast's detail line says "Quest done", and the ring fills with its check.
+  - The next quest starts `QUEST_NEXT_MS` (5 s) later.
+- **Gold still means "discovered" only**:
+  - The quest marker is a panel-coloured disc with a daylight flag icon.
+  - Reaching it brings up the place's normal gold pin and pulse.
+  - No new colour, so `tests/design.test.ts` passes unchanged.
+- **The daily goal hands the chip to the quest** (one goal at a time). It stays as one line in the stats card: "Today: 2 of 3 places".
+
+Changes:
+- `src/quests.ts` (new, pure + small store, like `today.ts`):
+  - A `Quest` type: `reach` holds the target id, lat/lng and start distance; `find` holds the number needed and the counted ids. Both have `seq` and `done`.
+  - `makeQuest(seq, places, isFound, me)`: the next quest, or `null` if nothing is left.
+  - `progress(quest, finds)`: the updated quest.
+  - `goalOf(quest, me)`: a `Goal`.
+  - `readQuest` / `writeQuest`: validate everything read back and never throw. Key `fogwalk:quest`, plus `:debug`.
+- `src/questLayer.ts` (new, like `placesLayer.ts`):
+  - `show(quest)` / `clear()`: one marker in the `quest` pane.
+  - It uses `L.divIcon`, because bundled Leaflet can't find its default marker image, so a plain `L.marker` shows a broken image.
+  - Tapping it says "Quest spot, about 240 m".
+- `src/discovery.ts`:
+  - Holds the active quest. `currentGoal()` returns the quest's goal, or the daily goal when there's no quest.
+  - In `check()`, `fresh` finds go through `progress` before the done comparison, so "Quest done" rides on the existing toast.
+  - Starts or restores the quest once places are loaded and there's a position. If a saved target id is gone from `places.json`, it makes a new quest.
+  - New `onMove(fix)` refreshes the reach distance.
+- `src/main.ts`:
+  - `discovery.onMove(fix)` in the precise-fix branch of `onFix`.
+  - The debug "reset fog" button also clears the debug quest key.
+  - `quest` goes on `window.fogMap` for the browser tests.
+- `src/today.ts`, `src/hud.ts`:
+  - `Goal` gains `title` ("Today" / "Quest") and `detail` (the card text, today built inside `hud.showGoal` from found/target, which can't describe a reach quest).
+  - The card adds the "Today: N of 3 places" line.
+- `src/map.ts`: `createPane('quest')` at z 470, above the fog (450) and below places (480) and you (500).
+- `src/config.ts`: `QUEST_MIN_M = 150`, `QUEST_MAX_M = 400`, `QUEST_FIND = 2`, `QUEST_NEXT_MS = 5000`, `QUEST_KEY = 'fogwalk:quest'`.
+- `src/icons.ts`, `src/style.css`: a flag icon, plus `.quest-pin` built from existing tokens only.
+- Tests:
+  - `tests/quests.test.ts` in `npm test`. It checks the target band and its fallback, `null` when nothing is left, that the find count ignores repeats, and that a damaged stored value gives `null`.
+  - A "Phase 6: quests" section in `tests/browser.mjs`:
+    - With `?debug`, a reach quest appears with its marker. Clicking the map at the target walks there; the toast says "Found <name>" / "Quest done", and a find quest follows.
+    - A reload keeps the quest and its progress, and reset clears it.
+
+Not doing:
+- XP or levels, a quest choice board, AI text.
+- Restricting `?debug` to localhost: quests are local only, so faking one only fools yourself. Revisit if anything competitive is added.
+- Two tabs: the last quest write wins.
+
+Separate deployment for the branch:
+- `deploy.yml` only runs on pushes to `main`, so pushing the branch never touches the live Pages site. GitHub Pages serves one site per repo, so the branch goes to a **Render static site** (set up once in the Render dashboard):
+  - repo `surrelsaga/map-mvp`, branch `feat/add-simple-no-ai-related-side-quests`
+  - build `npm ci && npm test && npm run build`, publish dir `dist`, env `NODE_VERSION=24`
+  - auto-deploy on push
+- Static sites are free on Render (the $50 credit stays untouched). They're HTTPS (GPS needs it), and Render is a challenge partner category.
+- `base: './'` in `vite.config.ts` already makes the build work at any URL.
+- The Render URL is a different origin from github.io, so test walks don't mix with real progress.
+
+Order (the usual loop above):
+1. `quests.ts` + `tests/quests.test.ts`.
+2. Wiring: discovery, main, pane, marker, hud and the goal.
+3. The browser test section.
+4. Tests, typecheck, build, browser suite, phone-size screenshots of the chip, marker and toast.
+5. `code-review` + `ponytail-review`.
+6. Your check at `localhost:3000/?debug`.
+7. Commit and push the branch, set up Render, walk it on the phone near SUTD.
+
+Check:
+- `npm test`, `npm run typecheck`, `npm run build` and `npm run test:browser` all pass.
+- By hand with `?debug`:
+  - The marker appears in the fog.
+  - Walking there gives "Found X" / "Quest done", and the ring checks.
+  - The next quest starts 5 s later.
+  - A reload keeps the quest, and reset clears it.
+- On the phone at the Render URL, a real walk to the marked spot completes the quest.
+
+As built (small differences from the plan above):
+- **`?quests=off`** (a URL switch in `main.ts`) gives the plain map with only today's goal. The earlier browser-test phases run with it (the `open()` helper adds it unless a test passes `quests: true`), so they still test the daily goal exactly as before; only the Phase 6 section turns quests on.
+- **A reach target is never a place you are standing next to**: places closer than `REVEAL_RADIUS + 20` m are skipped, because the next step would clear them and the quest would finish at once. When that leaves no reach target (every unfound place is right here), a find quest starts instead of no quest.
+- **The first quest needs a first accurate fix** (the position is where the distance is measured from). The first quest starts then, and each later one starts `QUEST_NEXT_MS` after the last finished, or at once on a reload if a finished one was saved. With nothing left to find, the chip goes back to today's goal.
+- **A quest whose place was cleared while the page was closed finishes quietly** (no find message), then the next one starts. A saved reach quest whose place is gone from `places.json`, or damaged data, is replaced by the next quest in line.
+- **`window.fogMap.quest()`** (copy of the active quest) is for the browser tests, like `snapshot` and `load`.
+- **UI** (checked with ui-ux-pro-max): the chip, ring and card are the existing ones, fed by a quest `Goal` (`title`, `label`, `detail` were added to `Goal`; the card line moved from `hud.showGoal` into the goal). The quest spot is a light disc with a dark flag in its own `quest` pane (above the fog, below discovered places): light, not gold, because gold means "discovered", and flag-shaped so it doesn't rely on colour. While a quest holds the chip, the card keeps a quiet "Today: N of 3 places" line. No new colour, so `tests/design.test.ts` is unchanged.
+- **Tests:** `tests/quests.test.ts` (Node) and a Phase 6 section in `tests/browser.mjs`: reach then find then nothing left, the distance following you, a reload mid-quest, a quiet completion, damaged saved data, the real data walked in debug mode, reset, and `?quests=off`.
+- **Known limits:** there is no skip or reroll: a reach quest aimed at a place you can't walk to (behind a fence or a river) stays until you get there, and is kept across reloads. (Adding a skip is the first thing to build if a real walk hits this.) The quest and the daily goal are separate counts that both see every find. Two tabs: the last quest write wins. A reach quest's ring shows distance walked, so it moves backwards if you walk away from the spot and never below empty. `?debug` is still open on the Pages URL; quests are local only, so faking one only fools yourself.
+- **Not verified here:** a real walk to a marked spot on a phone, and the Render deployment below (it needs the dashboard).
+
+Render setup for the branch (one time, in the Render dashboard, **New → Static Site**):
+- Repository `surrelsaga/map-mvp`, branch `feat/add-simple-no-ai-related-side-quests`
+- Build command `npm ci && npm test && npm run build`
+- Publish directory `dist`
+- Environment variable `NODE_VERSION` = `24`
+- Auto-deploy on push: on
+
+Commit message: `feat: two simple quests (reach a spot, find new places)`
 
 ## Known limits (stated, not solved)
 - Mobile browsers pause GPS when the screen locks, so the screen has to stay on while walking. Background tracking is out of scope.

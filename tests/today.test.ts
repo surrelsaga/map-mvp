@@ -35,11 +35,11 @@ assert.equal(countToday(noon, Array.from({ length: 9000 }, (_, i) => `p${i}`)).i
 
 // the goal and its wording: an instruction first, then progress, then done
 assert.equal(DAILY_GOAL, 3, 'the wording below assumes three places a day');
-assert.deepEqual(goalOf(0), { found: 0, target: 3, done: false, progress: 0, label: 'Find 3 places today' });
+assert.deepEqual(goalOf(0), { title: 'Today', found: 0, target: 3, done: false, progress: 0, label: 'Find 3 places today', detail: '0 of 3 new places, 3 to go' });
 assert.equal(goalOf(1).label, '1 of 3 places today');
 assert.equal(goalOf(2).label, '2 of 3 places today');
 assert(Math.abs(goalOf(2).progress - 2 / 3) < 1e-9);
-assert.deepEqual(goalOf(3), { found: 3, target: 3, done: true, progress: 1, label: 'Today’s goal done' });
+assert.deepEqual(goalOf(3), { title: 'Today', found: 3, target: 3, done: true, progress: 1, label: 'Today’s goal done', detail: 'All done. More finds are a bonus.' });
 assert.deepEqual([goalOf(7).done, goalOf(7).progress], [true, 1], 'extra finds stay done and the ring stays full');
 assert.equal(goalOf(1, 5).label, '1 of 5 places today', 'the target is a parameter (a quest can take over the slot)');
 

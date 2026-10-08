@@ -36,3 +36,10 @@ export const CHIME_HZ = [659, 880];       // the "found" chime: E5, then A5
 export const DAILY_GOAL = 3;              // new places to find per day: the goal the chip's ring fills toward (quests will take over this slot)
 export const TODAY_KEY = 'fogwalk:today'; // per-device count of today's finds; debug mode adds ':debug'
 export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open hint has been dismissed
+
+// Quests (two simple ones, no AI: reach a marked spot, then find new places; they alternate)
+export const QUEST_MIN_M = 150;           // a reach quest picks an unfound place at least this far away...
+export const QUEST_MAX_M = 400;           // ...and at most this far (the nearest unfound place if none is in between)
+export const QUEST_FIND = 2;              // new places a find quest asks for
+export const QUEST_NEXT_MS = 5000;        // how long a finished quest stays on the chip before the next one starts
+export const QUEST_KEY = 'fogwalk:quest'; // per-device quest state; debug mode adds ':debug'

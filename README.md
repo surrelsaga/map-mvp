@@ -11,6 +11,8 @@ npm run dev        # http://localhost:3000
 
 Open `http://localhost:3000/?debug` and tap the map to walk without leaving your desk (`?debug=10` walks 10× faster). Debug walks are saved separately from real ones; the **reset fog** button in the red badge clears them.
 
+Quests: a reach quest (walk to a marked spot) and a find quest (uncover 2 new places) alternate on the goal chip. Add `?quests=off` for the plain map with only today's daily goal.
+
 Progress is saved in the browser's `localStorage`, on your device only. So is the sound on/off choice.
 `index.html` can't be opened by double-click: browsers block ES modules on `file://`, so use the dev server.
 
@@ -31,6 +33,8 @@ Real GPS needs HTTPS (or localhost). To test it on a phone, use the deployed pag
 
 Every push to `main` runs `.github/workflows/deploy.yml` (test, build, publish to GitHub Pages).
 One-time setup, **before the first push of this setup**: repo **Settings → Pages → Source: GitHub Actions**. Until then Pages would publish the raw repo files, and the page would be blank because browsers can't run `.ts`.
+
+The `feat/add-simple-no-ai-related-side-quests` branch is deployed separately from `main` as a Render static site (build `npm ci && npm test && npm run build`, publish `dist`, `NODE_VERSION=24`); see `PLAN.md` phase 6. Its progress lives on its own address, apart from the Pages site.
 
 ## Places
 

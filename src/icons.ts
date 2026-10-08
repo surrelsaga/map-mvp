@@ -7,8 +7,14 @@ export const ICONS: Record<Group, string> = {
   outdoors: '<path d="M12 21v-6M12 3l6 8h-3l4 6H5l4-6H6l6-8z"/>',
   other: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.5 2.9 1-6.1L3.1 9.5l6.1-.9z"/>',
 };
+// The quest spot's flag. Not a place kind, so it isn't in ICONS (which has one entry per Group).
+const FLAG = '<path d="M6 21V4M6 5h11l-2.5 4L17 13H6"/>';
 export const GROUP_LABELS: Record<Group, string> = { food: 'Food & drink', shop: 'Shops', outdoors: 'Outdoors', other: 'Other' };
 
 // The gold disc with its icon inside: the same on the map and in the card.
 export const discHtml = (g: Group, px = 14) =>
   `<span class="place-disc"><svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[g]}</svg></span>`;
+
+// The quest spot: a light disc with a dark flag. Light (not gold, which means "discovered") and flag-shaped, so it reads without relying on colour.
+export const questHtml = (px = 16) =>
+  `<span class="quest-disc"><svg viewBox="0 0 24 24" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${FLAG}</svg></span>`;
