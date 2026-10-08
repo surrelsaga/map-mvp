@@ -5,21 +5,29 @@ import { say, showDebugBadge } from './ui.ts';
 import { startGps } from './gps.ts';
 import { startDebugWalk } from './debugWalk.ts';
 import * as fogLayer from './fogLayer.ts';
-import { MAX_ACCURACY } from './config.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY } from './config.ts';
 import type { Fix } from './types.ts';
+
+let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 
 // Every position, real GPS or debug walk, comes through here.
 function onFix(fix: Fix) {
-  say('');
   me.update(fix);                                    // the dot shows every fix, even a rough one
-  if (fix.accuracy <= MAX_ACCURACY) fogLayer.reveal(fix);   // but only a trustworthy fix clears fog
+  const now = performance.now();
+  if (fix.accuracy <= MAX_ACCURACY) {                // but only a trustworthy fix clears fog
+    lastPrecise = now;
+    say('');
+    fogLayer.reveal(fix);
+  } else if (!lastPrecise || now - lastPrecise > ROUGH_HINT_DELAY) {   // ignore brief dips near the limit, so the hint doesn't flicker
+    say(`GPS ±${Math.ceil(fix.accuracy / 10) * 10} m. Fog clears within ${MAX_ACCURACY} m, try outdoors.`);
+  }
   // next: places.check(fix), ...
 }
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
 if (debug === null) {
   say('Finding you…');
-  startGps(onFix, (msg, persistent) => { if (persistent || !me.where()) say(msg); });   // after a first fix, a missed update isn't worth a message
+  startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
   showDebugBadge();
   startDebugWalk(map, me.where, onFix, Number(debug));
