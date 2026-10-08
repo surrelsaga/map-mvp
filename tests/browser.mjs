@@ -19,9 +19,11 @@ const open = async (query = '', setup, { permit = true } = {}) => {
   await page.setViewport({ width: 390, height: 780, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await page.evaluateOnNewDocument(() => {                       // remember every toast shown, so a test can't miss one that already faded
     const seen = (window.__toasts = []);                         // watches the whole document from the very start: module scripts run before DOMContentLoaded
+    const Audio = window.AudioContext || window.webkitAudioContext;       // count the notes the page plays (the chime is two)
+    if (Audio) { const make = Audio.prototype.createOscillator; Audio.prototype.createOscillator = function () { window.__osc = (window.__osc ?? 0) + 1; return make.call(this); }; }
     let prev = '';
     new MutationObserver(() => {
-      const t = document.getElementById('toast')?.textContent ?? '';
+      const t = document.getElementById('toastTitle')?.textContent ?? '';
       if (t !== prev) { prev = t; if (t) seen.push(t); }
     }).observe(document, { childList: true, subtree: true, characterData: true });
   });
@@ -41,8 +43,13 @@ const ls = (p, k) => p.evaluate((k) => localStorage.getItem(k), k);
 const dragMap = async (p) => { await p.mouse.move(200, 400); await p.mouse.down(); await p.mouse.move(200, 250, { steps: 5 }); await p.mouse.up(); };
 const alphaAt = (p, lat, lng) => p.evaluate(([lat, lng]) => {   // fog opacity at a geographic point: ~0 cleared, ~230 fogged
   const pt = fogMap.map.latLngToContainerPoint([lat, lng]);
-  const c = document.querySelector('.leaflet-fog-pane canvas'), r = c.getBoundingClientRect();   // canvas is padded: screen point -> canvas pixel
-  return c.getContext('2d').getImageData(Math.round(pt.x - r.left), Math.round(pt.y - r.top), 1, 1).data[3];
+  const c = document.querySelector('.leaflet-fog-pane canvas'), r = c.getBoundingClientRect(), k = c.width / r.width;   // canvas is padded and may be denser than 1x: screen point -> canvas pixel
+  return c.getContext('2d').getImageData(Math.round((pt.x - r.left) * k), Math.round((pt.y - r.top) * k), 1, 1).data[3];
+}, [lat, lng]);
+const pixelAt = (p, lat, lng) => p.evaluate(([lat, lng]) => {            // [r, g, b, a] of the fog canvas at a point
+  const pt = fogMap.map.latLngToContainerPoint([lat, lng]);
+  const c = document.querySelector('.leaflet-fog-pane canvas'), r = c.getBoundingClientRect(), k = c.width / r.width;
+  return [...c.getContext('2d').getImageData(Math.round((pt.x - r.left) * k), Math.round((pt.y - r.top) * k), 1, 1).data];
 }, [lat, lng]);
 const dN = (m) => m / 111195, dE = (m) => m / 111195 / Math.cos(1.3413 * Math.PI / 180);
 const CLEAR = 40, FOGGED = 200;
@@ -350,9 +357,9 @@ const fakePlaces = (body, status = 200, delay = 0) => async (p) => {
 };
 const S0 = { lat: 1.3413, lng: 103.9638 };
 const pins = (p) => p.evaluate(() => [...document.querySelectorAll('.place-pin')].map((e) => e.title));
-const hud = (p) => p.evaluate(() => document.getElementById('hud').textContent);
+const stats = (p) => p.evaluate(() => ({ chip: document.getElementById('chipText').textContent, places: document.getElementById('statsPlaces').textContent, area: document.getElementById('statsArea').textContent, last: document.getElementById('statsLast').textContent }));
 const toasts = (p) => p.evaluate(() => window.__toasts ?? []);
-const toastText = (p) => p.evaluate(() => { const t = document.getElementById('toast'); return t.classList.contains('show') ? t.textContent : null; });
+const toastText = (p) => p.evaluate(() => document.getElementById('toast').classList.contains('show') ? document.getElementById('toastTitle').textContent : null);
 const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) { if (await fn()) return true; await sleep(100); } return false; };
 { // discover by walking: starts hidden, appears when its spot clears, with a toast
   const places = [
@@ -362,14 +369,18 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   ];
   const p = await open('?debug=10', fakePlaces({ places })); await sleep(800);
   assert.deepEqual(await pins(p), ['Right Here'], 'only the place under the start circle is shown');
-  assert.deepEqual(await toasts(p), ['Found: Right Here'], 'a place under you when the app opens is a find, so it is announced');
-  assert.match(await hud(p), /^0\.\d\d% explored, 1 of 3 places found$/, 'hud: ' + (await hud(p)));
-  const pct0 = parseFloat(await hud(p));
+  assert.deepEqual(await toasts(p), ['Found Right Here'], 'a place under you when the app opens is a find, so it is announced');
+  let st = await stats(p);
+  assert.equal(st.chip, '1 found'); assert.equal(st.places, '1 of 3 places found'); assert.match(st.area, /^\d\.\d\d% of the area$/, 'area: ' + st.area);
+  assert.equal(st.last, 'Last: Right Here');
+  const pct0 = parseFloat(st.area);
   await p.mouse.click(195, 330);                                              // walk ~70 m north
-  assert(await waitFor(async () => (await toastText(p)) === 'Found: Up The Road'), 'a toast names the place when it is reached (toast: ' + (await toastText(p)) + ')');
+  assert(await waitFor(async () => (await toastText(p)) === 'Found Up The Road'), 'a toast names the place when it is reached (toast: ' + (await toastText(p)) + ')');
   assert.deepEqual((await pins(p)).sort(), ['Right Here', 'Up The Road'], 'its pin appears; the far one stays hidden');
-  assert.match(await hud(p), /2 of 3 places found/);
-  assert(parseFloat(await hud(p)) > pct0, 'explored % went up');
+  st = await stats(p);
+  assert.equal(st.chip, '2 found'); assert.equal(st.places, '2 of 3 places found'); assert.equal(st.last, 'Last: Up The Road');
+  assert.equal(await p.evaluate(() => document.getElementById('toastDetail').textContent), 'Cafe', 'the toast says what kind of place it is');
+  assert(parseFloat(st.area) > pct0, 'explored % went up');
   await sleep(4600);                                                          // TOAST_MS
   assert.equal(await toastText(p), null, 'the toast fades away');
   assert.equal(await p.evaluate(() => document.getElementById('toast').textContent), '', 'and its text is cleared, so screen readers are not left a stale message');
@@ -377,7 +388,8 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   await sleep(500);
   const box = await p.evaluate(() => { const r = document.querySelector('.place-pin[title="Up The Road"]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await p.mouse.click(box.x, box.y); await sleep(400);
-  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), 'Up The Road', 'tapping a pin shows its name');
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content strong')?.textContent), 'Up The Road', 'tapping a pin shows its name');
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content span')?.textContent), 'Cafe', 'and what kind of place it is');
   await shot(p, 'places');
   // a reload brings the found places back quietly
   await sleep(1500);
@@ -389,12 +401,14 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
 { // the places file arrives late: what was cleared in the meantime is still announced; only earlier sessions' fog is quiet
   const places = [{ name: 'Up The Road', type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng }];
   const p = await open('?debug=10', fakePlaces({ places }, 200, 8000));      // the walk (~5 s) is over before the file arrives
+  let st;
   await sleep(300);
-  assert.match(await hud(p), /0 places found$/, 'while loading: no total yet (' + (await hud(p)) + ')');
+  st = await stats(p);
+  assert.equal(st.chip, '0 found'); assert.equal(st.places, '0 places found', 'while loading there is no total yet');
   await p.mouse.click(195, 330);
   assert.equal(await waitFor(async () => (await pins(p)).length > 0, 14000), true, 'the pin appears once the file arrives');
-  assert.deepEqual(await toasts(p), ['Found: Up The Road'], 'and it is announced, not found "quietly"');
-  assert.match(await hud(p), /1 of 1 places found/);
+  assert.deepEqual(await toasts(p), ['Found Up The Road'], 'and it is announced, not found "quietly"');
+  assert.equal((await stats(p)).places, '1 of 1 places found');
   await p.close(); t('late places file still announces new finds');
 }
 { // several found at once, and untrusted names
@@ -407,14 +421,14 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
     { name: 'No coords', type: 'cafe' },
   ];
   const p = await open('?debug=10', fakePlaces({ places })); await sleep(800);
-  assert.match(await hud(p), /0 of 3 places found/, 'malformed entries are not counted: ' + (await hud(p)));
+  assert.equal((await stats(p)).places, '0 of 3 places found', 'malformed entries are not counted');
   await p.mouse.click(195, 330);
   assert(await waitFor(async () => (await toastText(p)) !== null), 'toast appears');
-  assert.match(await toastText(p), /^Found: .+, .+ and 1 more$/, 'several at once are summarised: ' + (await toastText(p)));
+  assert.match(await toastText(p), /^Found 3 places: .+, .+ and 1 more$/, 'several at once are summarised: ' + (await toastText(p)));
   await sleep(300);
   const box = await p.evaluate((n) => { const e = [...document.querySelectorAll('.place-pin')].find((x) => x.title === n); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, evil);
   await p.mouse.click(box.x, box.y); await sleep(400);
-  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), evil, 'the name is shown as text');
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content strong')?.textContent), evil, 'the name is shown as text');
   assert.equal(await p.evaluate(() => document.querySelectorAll('img[src="x"], .leaflet-popup-content img').length), 0, 'no <img> was created from the name');
   assert.equal(await p.evaluate(() => window.__xss), undefined, 'and nothing ran');
   await p.close(); t('multi-find message, untrusted names stay text ok');
@@ -441,19 +455,19 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   const p = await open('?debug', async (p) => { await p.setRequestInterception(true); p.on('request', (r) => { if (!r.url().endsWith('places.json')) return r.continue(); asked++; r.respond({ status: 404, body: 'no' }).catch(() => {}); }); });
   await sleep(7000);                                                          // longer than all the retry pauses together
   assert.equal(asked, 1, '404 is not retried');
-  assert.match(await hud(p), /explored, 0 places found$/);
+  assert.equal((await stats(p)).places, '0 places found');
   await p.close(); t('404 not retried ok');
 }
-{ // narrow phone: a long HUD wraps instead of covering the GPS message
+{ // narrow phone: chip, stats panel and GPS message stack without covering each other
   const p = await open('?debug', fakePlaces({ places: [] }));
   await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-  await p.evaluate(() => { document.getElementById('hud').textContent = '12.34% explored, 100 of 282 places found, and then some extra words to force a wrap'; document.getElementById('status').textContent = 'GPS ±90 m. Fog clears within 50 m, try outdoors.'; });
-  const r = await p.evaluate(() => ['hud', 'status'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
-  assert.equal(await p.evaluate(() => document.getElementById('hud').getAttribute('role')), 'group', 'the HUD has a role, so its label means something');
-  assert(r[0].height > 30, 'the HUD wrapped to two lines (' + r[0].height + ' px)');
-  assert(r[0].bottom <= r[1].top, `HUD (bottom ${r[0].bottom}) does not overlap the status banner (top ${r[1].top})`);
-  assert(r[0].right <= 320 && r[1].right <= 320 && r[0].left >= 0, 'both stay inside the screen');
-  await p.evaluate(() => { document.getElementById('toast').textContent = 'Found: ' + 'x'.repeat(80); document.getElementById('toast').classList.add('show'); });
+  await p.click('#chip');
+  await p.evaluate(() => { document.getElementById('statsLast').textContent = 'Last: ' + 'A very long place name '.repeat(4); document.getElementById('status').textContent = 'Weak GPS (±90 m). Fog clears within 50 m, try outdoors.'; });
+  const r = await p.evaluate(() => ['chip', 'stats', 'status'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
+  assert(r[0].bottom <= r[1].top && r[1].bottom <= r[2].top, `chip, panel and message stack in order (${r.map((x) => `${Math.round(x.top)}-${Math.round(x.bottom)}`)})`);
+  assert(r.every((x) => x.left >= 0 && x.right <= 320), 'all three stay inside the screen');
+  assert(r[0].height >= 44, `the chip is a finger-sized target (${r[0].height} px)`);
+  await p.evaluate(() => { document.getElementById('toastTitle').textContent = 'Found ' + 'x'.repeat(80); document.getElementById('toast').classList.add('show'); });
   const tb = await p.evaluate(() => document.getElementById('toast').getBoundingClientRect().toJSON());
   assert(tb.left >= 0 && tb.right <= 320, `a long unbroken name stays inside the screen (${tb.left}..${tb.right})`);
   await shot(p, 'layout-narrow');
@@ -462,7 +476,7 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
 { // no places file, or a broken one: the app still works
   for (const [name, setup] of [['404', fakePlaces('nope', 404)], ['not JSON', fakePlaces('{{{')], ['wrong shape', fakePlaces('[1,2,3]')], ['empty list', fakePlaces({ places: [] })]]) {
     const p = await open('?debug', setup); await sleep(800);
-    assert.match(await hud(p), /explored, 0 places found$/, `${name}: hud still works (${await hud(p)})`);
+    assert.equal((await stats(p)).places, '0 places found', `${name}: stats still work`);
     assert.deepEqual(await pins(p), [], `${name}: no pins`);
     assert((await count(p)) > 20, `${name}: fog still clears`);
     await p.close();
@@ -471,7 +485,7 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
 }
 { // the real data end to end: walk to the nearest place that is not already in the start circle
   const p = await open('?debug=10'); await sleep(800);
-  const total = Number((await hud(p)).match(/of (\d+) places/)?.[1]);
+  const total = Number((await stats(p)).places.match(/of (\d+) places/)?.[1]);
   assert(total > 100, `real places loaded (${total})`);
   const target = await p.evaluate(async (S0) => {
     const f = await (await fetch('places.json')).json();
@@ -484,6 +498,233 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   assert((await pins(p)).includes(target.name), 'and its pin is on the map');
   await shot(p, 'places-real');
   await p.close(); t(`real data: walked to "${target.name}" (${target.type}) and found it`);
+}
+
+console.log('Phase 5: look and feel');
+{ // the chip opens the stats panel; Escape or a tap on the map closes it
+  const p = await open('?debug', fakePlaces({ places: [] })); await sleep(800);
+  const open_ = () => p.evaluate(() => ({ hidden: document.getElementById('stats').hidden, expanded: document.getElementById('chip').getAttribute('aria-expanded') }));
+  assert.deepEqual(await open_(), { hidden: true, expanded: 'false' }, 'closed at first: only the chip shows');
+  await p.click('#chip');
+  assert.deepEqual(await open_(), { hidden: false, expanded: 'true' }, 'the chip opens the panel');
+  await p.keyboard.press('Escape');
+  assert.deepEqual(await open_(), { hidden: true, expanded: 'false' }, 'Escape closes it');
+  assert.equal(await p.evaluate(() => document.activeElement.id), 'chip', 'and focus goes back to the chip');
+  await p.click('#chip'); await p.mouse.click(300, 600);
+  assert.equal((await open_()).hidden, true, 'a tap on the map closes it too');
+  await p.click('#chip'); await p.click('#chip');
+  assert.equal((await open_()).hidden, true, 'the chip toggles');
+  // font, touch targets, keyboard focus
+  await p.evaluate(() => document.fonts.ready);
+  assert(await p.evaluate(() => document.fonts.check('700 16px "Atkinson Hyperlegible Next"') && document.fonts.check('400 16px "Atkinson Hyperlegible Next"')), 'the self-hosted font is loaded');
+  assert.match(await p.evaluate(() => getComputedStyle(document.getElementById('chip')).fontFamily), /Atkinson Hyperlegible Next/);
+  const named = async (sel) => { const h = await p.$(sel); const n = await p.accessibility.snapshot({ root: h }); return n && { role: n.role, name: n.name, checked: n.checked }; };
+  assert.deepEqual(await named('#chip'), { role: 'button', name: 'Progress: 0 found', checked: undefined }, 'the chip has a stable name that says what its number counts');
+  await p.click('#chip');
+  assert.equal((await named('#chip')).name, 'Progress: 0 found', 'and keeps it while the panel is open');
+  await p.click('#chip');
+  await p.click('#chip');
+  assert.deepEqual(await named('#soundSwitch'), { role: 'switch', name: 'Sound', checked: true }, 'the switch is named "Sound" and its state comes from aria-checked');
+  await p.focus('#soundSwitch'); await p.mouse.click(300, 600);
+  assert.notEqual(await p.evaluate(() => document.activeElement.tagName), 'BODY', 'closing the panel with a tap on the map does not drop keyboard focus to the top of the page');
+  await p.click('#chip');
+  const sizes = await p.evaluate(() => ['chip', 'soundSwitch'].map((id) => document.getElementById(id).getBoundingClientRect().height));
+  assert(sizes.every((h) => h >= 44), `chip and sound switch are at least 44 px tall (${sizes})`);
+  await p.click('#chip');
+  await dragMap(p);
+  const rb = await p.evaluate(() => document.getElementById('recentre').getBoundingClientRect().toJSON());
+  assert(rb.width >= 44 && rb.height >= 44, `the recentre button is at least 44 px (${rb.width}x${rb.height})`);
+  await p.evaluate(() => document.activeElement.blur());
+  for (let i = 0; i < 4 && (await p.evaluate(() => document.activeElement.id)) !== 'chip'; i++) await p.keyboard.press('Tab');   // the map itself is focusable (arrow keys pan it), so it comes first
+  const focus = await p.evaluate(() => { const e = document.activeElement, cs = getComputedStyle(e); return { id: e.id, width: cs.outlineWidth, style: cs.outlineStyle }; });
+  assert.equal(focus.id, 'chip', 'Tab reaches the chip');
+  assert(focus.width === '3px' && focus.style === 'solid', `with a visible focus ring (${JSON.stringify(focus)})`);
+  const ring = await p.evaluate(() => { const cs = getComputedStyle(document.activeElement); return { line: cs.outlineColor, band: cs.boxShadow }; });
+  await shot(p, 'focus-ring');
+  assert.equal(ring.line, 'rgb(26, 37, 56)', 'a dark line (visible on the pale map)');
+  assert.match(ring.band, /rgb\(238, 243, 248\)/, 'around a light band (visible on the dark panels)');
+  const bg = await p.evaluate(() => getComputedStyle(document.querySelector('.leaflet-control-attribution')).backgroundColor);
+  assert.equal(bg, 'rgba(26, 37, 56, 0.85)', 'the attribution bar uses the dark style (it must win over Leaflet\'s own stylesheet)');
+  await p.close(); t('chip, panel, font, tap targets, focus ring ok');
+}
+{ // pins: a gold disc with the right icon for each kind of place; only fresh finds pulse
+  const at = (n, e) => ({ lat: S0.lat + dN(n), lng: S0.lng + dE(e) });
+  const places = [
+    { name: 'Noodle House', type: 'fast_food', ...at(26, 0) }, { name: 'Corner Shop', type: 'convenience', ...at(0, 26) },
+    { name: 'Tiny Park', type: 'park', ...at(-26, 0) }, { name: 'Police Post', type: 'police', ...at(0, -26) },
+  ];
+  const p = await open('?debug', fakePlaces({ places }, 200, 3000));        // the file arrives after the page is up, so we can catch the pulse
+  assert(await waitFor(async () => p.evaluate(() => !!document.querySelector('.place-pin.is-new')), 8000), 'a new find pulses');
+  const kinds = await p.evaluate(() => [...document.querySelectorAll('.place-pin')].map((e) => ({ title: e.title, kind: [...e.classList].find((c) => ['food', 'shop', 'outdoors', 'other'].includes(c)), svg: !!e.querySelector('.place-disc svg path'), box: e.getBoundingClientRect().width })));
+  assert.deepEqual(kinds.map((k) => [k.title, k.kind]).sort(), [['Corner Shop', 'shop'], ['Noodle House', 'food'], ['Police Post', 'other'], ['Tiny Park', 'outdoors']], 'each kind of place gets its own pin');
+  assert(kinds.every((k) => k.svg), 'every pin has an icon');
+  assert(kinds.every((k) => k.box >= 28), `and a finger-sized box (${kinds.map((k) => k.box)})`);
+  const gold = await p.evaluate(() => getComputedStyle(document.querySelector('.place-pin .place-disc')).backgroundColor);
+  assert.equal(gold, 'rgb(242, 179, 61)', 'the pin disc is the discovery gold');
+  await sleep(1600);
+  assert.equal(await p.evaluate(() => document.querySelectorAll('.place-pin.is-new').length), 0, 'the pulse ends');
+  await p.reload({ waitUntil: 'networkidle2' }); await sleep(3600);
+  assert.equal(await p.evaluate(() => document.querySelectorAll('.place-pin').length), 4, 'all four are back after a reload');
+  assert.equal(await p.evaluate(() => document.querySelectorAll('.place-pin.is-new').length), 0, 'and restored pins do not pulse');
+  await p.close(); t('pin kinds, gold, pulse only for fresh finds ok');
+}
+{ // reduced motion: no pulse, and the message fades instead of sliding
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const reduce = (p) => p.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  const calm = await open('?debug', async (p) => { await reduce(p); await fakePlaces({ places })(p); });
+  await sleep(500);
+  assert.equal(await calm.evaluate(() => getComputedStyle(document.querySelector('.place-pin .place-disc')).animationName), 'none', 'reduced motion: no pulse');
+  assert.deepEqual(await calm.evaluate(() => [fogMap.map.options.zoomAnimation, fogMap.map.options.fadeAnimation, fogMap.map.options.markerZoomAnimation]), [false, false, false], 'reduced motion: the map does not animate zooms or fades either');
+  // resting position of the hidden message: below its place and ready to rise, unless motion is reduced
+  const hiddenToast = (p) => p.evaluate(() => getComputedStyle(document.getElementById('toast')).transform);
+  const normalMap = await open('?debug', fakePlaces({ places: [] }));
+  assert.deepEqual(await normalMap.evaluate(() => [fogMap.map.options.zoomAnimation, fogMap.map.options.fadeAnimation]), [true, true], 'normally it does');
+  await normalMap.close();
+  const calmEmpty = await open('?debug', async (p) => { await reduce(p); await fakePlaces({ places: [] })(p); }), normalEmpty = await open('?debug', fakePlaces({ places: [] }));
+  assert.equal(await hiddenToast(calmEmpty), 'none', 'reduced motion: the message does not slide');
+  assert.notEqual(await hiddenToast(normalEmpty), 'none', 'normally the hidden message waits below its place, ready to rise');
+  for (const x of [calm, calmEmpty, normalEmpty]) await x.close();
+  t('reduced motion ok');
+}
+{ // sound: silent before the first tap, a two-note chime after it, and the switch mutes it and remembers
+  const at = (n) => ({ lat: S0.lat + dN(n), lng: S0.lng });
+  const places = [0, 600, 1200, 1800].map((n, i) => ({ name: `Spot ${i}`, type: 'cafe', ...at(n) }));
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); });
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const notes = () => p.evaluate(() => window.__osc ?? 0);
+  await fixAt(0); await sleep(600);
+  assert.deepEqual(await toasts(p), ['Found Spot 0'], 'the first find is announced');
+  assert.equal(await notes(), 0, 'but there is no sound before the user has touched the page');
+  await p.mouse.click(200, 400); await sleep(300);                           // the first tap unlocks audio
+  await fixAt(600); await sleep(600);
+  assert.equal(await notes(), 2, 'after a tap, a find plays a two-note chime');
+  await p.click('#chip');
+  const sw = () => p.evaluate(() => [document.getElementById('soundSwitch').getAttribute('aria-checked'), document.querySelector('#soundSwitch .state').textContent].join('|'));
+  assert.equal(await sw(), 'true|✓ on');
+  await p.click('#soundSwitch');
+  assert.equal(await sw(), 'false|off', 'the switch turns sound off');
+  await fixAt(1200); await sleep(600);
+  assert.deepEqual((await toasts(p)).slice(-1), ['Found Spot 2'], 'finds are still announced on screen');
+  assert.equal(await notes(), 2, 'but silently while muted');
+  await p.reload({ waitUntil: 'networkidle2' });
+  await p.click('#chip');
+  assert.equal(await p.evaluate(() => document.getElementById('soundSwitch').getAttribute('aria-checked')), 'false', 'the choice survives a reload');
+  await p.click('#soundSwitch'); await p.click('#soundSwitch'); await p.click('#soundSwitch');   // back on: three presses from off ends on
+  assert.equal(await p.evaluate(() => document.getElementById('soundSwitch').getAttribute('aria-checked')), 'true');
+  await p.close(); t('chime after first tap, mute, remembered');
+}
+{ // fog: crisp on dense screens within a pixel budget, and a gold rim on the cleared edge
+  const p = await open('?debug', fakePlaces({ places: [] })); await sleep(800);
+  const dense = await p.evaluate(() => { const c = document.querySelector('.leaflet-fog-pane canvas'); return { scale: c.width / parseFloat(c.style.width), pixels: c.width * c.height }; });
+  assert(dense.scale >= 1.5, `a 2x screen gets a crisp fog (${dense.scale.toFixed(2)}x)`);
+  assert(dense.pixels <= 4_100_000, `within the pixel budget (${dense.pixels})`);
+  const s0 = await where(p);
+  const rim = await pixelAt(p, s0.lat, s0.lng + dE(55)), deep = await pixelAt(p, s0.lat, s0.lng + dE(100));
+  assert(rim[0] - rim[2] >= 25, `just outside the cleared edge the fog glows gold (rgb ${rim.slice(0, 3)})`);
+  assert(deep[2] - deep[0] >= 20 && deep[3] >= 235, `further out it is plain pre-dawn blue and nearly opaque (rgba ${deep})`);
+  const css = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fog').trim());
+  const want = [1, 3, 5].map((i) => parseInt(css.slice(i, i + 2), 16));
+  assert(deep.slice(0, 3).every((v, i) => Math.abs(v - want[i]) <= 2), `the fog is the stylesheet's --fog (${css}), not a copy (${deep.slice(0, 3)})`);
+  assert(await alphaAt(p, s0.lat, s0.lng + dE(20)) < 10, 'and the middle is fully clear');
+  await shot(p, 'fog-rim');
+  await p.setViewport({ width: 390, height: 780, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  await p.evaluate(() => fogMap.map.invalidateSize()); await sleep(600);
+  const three = await p.evaluate(() => { const c = document.querySelector('.leaflet-fog-pane canvas'); return { scale: c.width / parseFloat(c.style.width), pixels: c.width * c.height }; });
+  assert(three.scale < 3 && three.pixels <= 4_100_000, `a 3x screen is capped to the budget instead of using ${3 * 3 * 1.2}M pixels (${three.scale.toFixed(2)}x, ${(three.pixels / 1e6).toFixed(1)}M px)`);
+  await p.setViewport({ width: 2560, height: 1440, deviceScaleFactor: 1 });
+  await p.evaluate(() => fogMap.map.invalidateSize()); await sleep(800);
+  const big = await p.evaluate(() => { const c = document.querySelector('.leaflet-fog-pane canvas'); return { scale: c.width / parseFloat(c.style.width), pixels: c.width * c.height }; });
+  assert(big.scale < 1 && big.pixels <= 4_100_000, `a large desktop window still stays within the budget by drawing the fog softer (${big.scale.toFixed(2)}x, ${(big.pixels / 1e6).toFixed(1)}M px)`);
+  await p.close(); t('fog density, budget and gold rim ok');
+}
+{ // a pinch (move events at fractional zooms, no zoom animation) keeps the fog glued to the streets
+  const p = await open('?debug', fakePlaces({ places: [] })); await sleep(800);
+  const s0 = await where(p);
+  // small fractional zooms: too small for the canvas edge to drift into view, so only a redraw triggered by the zoom change keeps the fog right
+  await p.evaluate(() => fogMap.map._move(fogMap.map.getCenter(), 17.3)); await sleep(300);          // what a pinch does every frame
+  assert(await alphaAt(p, s0.lat, s0.lng + dE(40)) < 40, 'zoomed in a little mid-pinch, 40 m from you is still cleared (the old drawing would have it fogged)');
+  assert(await alphaAt(p, s0.lat, s0.lng + dE(120)) > 200, 'and 120 m out is still fog');
+  await p.evaluate(() => fogMap.map._move(fogMap.map.getCenter(), 16.8)); await sleep(300);
+  assert(await alphaAt(p, s0.lat, s0.lng + dE(52)) >= 60, 'zoomed out a little, the cleared patch has shrunk on screen with the map (the old drawing would still show 52 m as clear)');
+  assert(await alphaAt(p, s0.lat, s0.lng + dE(20)) < 10, 'while 20 m from you is clear');
+  // the end of a gesture redraws once, not twice
+  await p.evaluate(() => {
+    window.__clears = 0; const clear = CanvasRenderingContext2D.prototype.clearRect;
+    CanvasRenderingContext2D.prototype.clearRect = function (...a) { if (this.canvas.parentElement?.classList.contains('leaflet-fog-pane')) window.__clears++; return clear.apply(this, a); };
+    fogMap.map._move(fogMap.map.getCenter(), 17.4); fogMap.map.fire('moveend');                      // a redraw is queued by the move, then the gesture ends
+  });
+  await sleep(200);
+  assert.equal(await p.evaluate(() => window.__clears), 1, 'the end of a gesture draws the fog once (a queued redraw is dropped, not repeated)');
+  await p.close(); t('pinch zoom, single redraw ok');
+}
+{ // the stylesheet is missing: the app still starts, says so in the console, and draws something sensible
+  const warnings = [];
+  const p = await open('?debug', async (p) => { p.on('console', (m) => warnings.push(m.text())); await p.setRequestInterception(true); p.on('request', (r) => (r.resourceType() === 'stylesheet' ? r.abort() : r.continue())); });
+  await sleep(1000);
+  assert(warnings.some((w) => /--fog is missing from the stylesheet/.test(w)), 'the console names the missing colour: ' + warnings.filter((w) => /missing/.test(w)));
+  assert((await p.evaluate(() => [...document.querySelectorAll('.leaflet-player-pane path')].every((e) => /^#[0-9a-f]{3,6}$/i.test(e.getAttribute('stroke') ?? '') && /^#[0-9a-f]{3,6}$/i.test(e.getAttribute('fill') ?? '')))), 'the dot and ring still have real colours (grey fallbacks), not empty ones');
+  assert((await where(p)) !== null && (await count(p)) > 20, 'and the app works');
+  await p.close(); t('missing stylesheet ok');
+}
+{ // panning does not redraw the fog on every frame: only when the view nears the edge of the padded canvas
+  const p = await open('?debug', fakePlaces({ places: [] })); await sleep(800);
+  await p.evaluate(() => { window.__redraws = 0; new MutationObserver(() => window.__redraws++).observe(document.querySelector('.leaflet-fog-pane canvas'), { attributes: true, attributeFilter: ['style'] }); });
+  const redraws = () => p.evaluate(() => window.__redraws);
+  await p.mouse.move(250, 500); await p.mouse.down();
+  for (let x = 250; x >= 170; x -= 10) await p.mouse.move(x, 500);                  // a drag of 80 px: well inside the padding
+  assert.equal(await redraws(), 0, 'a short drag does not redraw the fog (it moves with the map)');
+  for (let x = 170; x >= 40; x -= 10) await p.mouse.move(x, 500);                   // and on to 210 px: beyond 60% of the padding
+  assert((await redraws()) >= 1, 'a long drag redraws it before the canvas edge could show');
+  await p.mouse.up(); await sleep(1500);
+  const edges = await p.evaluate(() => { const r = document.querySelector('.leaflet-fog-pane canvas').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; });
+  assert(edges[0] <= 0 && edges[1] <= 0 && edges[2] >= 390 && edges[3] >= 780, `the fog still covers the whole screen after the drag (${edges.map(Math.round)})`);
+  await p.close(); t('pan redraws only near the canvas edge');
+}
+{ // no updates for a while: if a fresh position can still be had you were just standing still; only if not is the signal lost
+  const dotOf = (p) => p.evaluate(() => [...document.querySelectorAll('.leaflet-player-pane path')].map((e) => [e.getAttribute('fill-opacity'), e.getAttribute('stroke'), e.getAttribute('fill')]));
+  // `probe`: 'fail' answers with an error at once, 'ok' answers with a position, 'slowfail' fails only after 6 s
+  const setup = (probe) => async (p) => { await captureFix(p); await p.evaluateOnNewDocument((mode) => {
+    window.__probes = 0;
+    navigator.geolocation.getCurrentPosition = (ok, fail) => {
+      window.__probes++;
+      if (mode === 'ok') ok({ coords: { latitude: 1.37, longitude: 103.99, accuracy: 15 }, timestamp: Date.now() });
+      else if (mode === 'slowfail') setTimeout(() => fail({ code: 2 }), 6000);
+      else fail({ code: 2 });
+    };
+  }, probe); };
+  const lost = await open('', setup('fail')), still = await open('', setup('ok')), racer = await open('', setup('slowfail'));
+  const here = { coords: { latitude: 1.36, longitude: 103.98, accuracy: 20 } };
+  for (const p of [lost, still, racer]) await p.evaluate((c) => window.__fix(c), here);
+  assert.deepEqual((await dotOf(lost)).map((d) => d[0]), ['0.1', '1'], 'live: a blue dot with its accuracy ring');
+  // the race, set up first so it is exact: the moment the third phone's position request starts, a real fix arrives; the request then fails 6 s later
+  assert(await waitFor(() => racer.evaluate(() => window.__probes >= 1), 55000), 'the third phone is asked for a position');
+  await racer.evaluate((c) => window.__fix(c), here);
+  const fixedAt = Date.now();
+  assert(await waitFor(async () => (await status(lost)) !== '', 55000), 'with no updates and no position on request, the signal is called lost');
+  assert.equal(await status(lost), 'No GPS signal. Showing where you last were.');
+  await shot(lost, 'stale-dot');
+  const dim = await dotOf(lost);
+  assert.deepEqual(dim.map((d) => d[0]), ['0', '1'], 'the accuracy ring is hidden and the dot is still there');                       // ring is drawn first, then the dot
+  assert.deepEqual(dim[1].slice(1), ['#1a2538', '#93a3ba'], 'a grey dot with a dark outline: it shows on the pale map and on the dark fog');
+  // while lost it does not keep hammering the GPS
+  const probesWhenLost = await lost.evaluate(() => window.__probes);
+  await sleep(12000);
+  assert.equal(await lost.evaluate(() => window.__probes), probesWhenLost, 'it does not ask again every few seconds while the signal is lost (battery)');
+  await lost.evaluate((c) => window.__fix(c), here); await sleep(300);
+  assert.equal(await status(lost), '', 'a new fix clears the message');
+  assert.deepEqual((await dotOf(lost)).map((d) => d[0]), ['0.1', '1'], 'and the dot is live again');
+  // standing still: asked, answered, fine
+  assert(await waitFor(() => still.evaluate(() => window.__probes >= 1), 12000), 'the phone that sent no updates was asked for a position (its own check runs on its own 5 s cycle)');
+  await sleep(500);
+  assert.equal(await status(still), '', 'it answered, so there is no "No GPS" message');
+  assert.equal((await where(still)).lat, 1.37, 'and that position was used like any other fix');
+  assert.deepEqual((await dotOf(still)).map((d) => d[0]), ['0.1', '1'], 'the dot stays live');
+  // the race: the request failed (6 s after it started) with a fresh fix already in hand
+  await sleep(Math.max(0, 7500 - (Date.now() - fixedAt)));
+  assert.equal(await status(racer), '', 'a request that fails after a real fix arrived does not call the signal lost');
+  assert.deepEqual((await dotOf(racer)).map((d) => d[0]), ['0.1', '1'], 'and the dot stays live');
+  for (const p of [lost, still, racer]) await p.close();
+  t('stale GPS: lost, standing still, race, back-off ok');
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));

@@ -2,7 +2,7 @@
 /// <reference types="node" />
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parsePlaces, discover, foundMessage, type Place } from '../src/places.ts';
+import { parsePlaces, discover, foundMessage, typeLabel, groupOf, type Place } from '../src/places.ts';
 import { circleCells, formatPercent } from '../src/coverage.ts';
 import { revealPath, dist, M_PER_DEG } from '../src/fog.ts';
 import { CELL, SUTD, AREA_RADIUS } from '../src/config.ts';
@@ -57,14 +57,22 @@ assert.equal(found.size, 3);
 // ---- the toast text
 const names = (n: number) => list.concat(list).slice(0, n).map((p, i) => ({ ...p, name: 'ABCDEF'[i] }));
 assert.equal(foundMessage([]), '');
-assert.equal(foundMessage(names(1)), 'Found: A');
-assert.equal(foundMessage(names(2)), 'Found: A and B');
-assert.equal(foundMessage(names(3)), 'Found: A, B and 1 more');
-assert.equal(foundMessage(names(6)), 'Found: A, B and 4 more');
+assert.equal(foundMessage(names(1)), 'Found A');
+assert.equal(foundMessage(names(2)), 'Found 2 places: A and B');
+assert.equal(foundMessage(names(3)), 'Found 3 places: A, B and 1 more');
+assert.equal(foundMessage(names(6)), 'Found 6 places: A, B and 4 more');
 const named = (...ns: string[]) => ns.map((name) => ({ name, type: 'x', lat: 0, lng: 0 }));    // chains repeat names: count them instead of listing them twice
-assert.equal(foundMessage(named('7-Eleven', '7-Eleven')), 'Found: 7-Eleven ×2');
-assert.equal(foundMessage(named('7-Eleven', 'Cafe', '7-Eleven')), 'Found: 7-Eleven ×2 and Cafe');
-assert.equal(foundMessage(named('7-Eleven', 'Cafe', '7-Eleven', 'Bank', 'Gym')), 'Found: 7-Eleven ×2, Cafe and 2 more');
+assert.equal(foundMessage(named('7-Eleven')), 'Found 7-Eleven');
+assert.equal(foundMessage(named('7-Eleven', '7-Eleven')), 'Found 2 places: 7-Eleven ×2');
+assert.equal(foundMessage(named('7-Eleven', 'Cafe', '7-Eleven')), 'Found 3 places: 7-Eleven ×2 and Cafe');
+assert.equal(foundMessage(named('7-Eleven', 'Cafe', '7-Eleven', 'Bank', 'Gym')), 'Found 5 places: 7-Eleven ×2, Cafe and 2 more');
+
+// ---- plain words for OpenStreetMap values, and the four pin groups
+assert.equal(typeLabel('fast_food'), 'Fast food');
+assert.equal(typeLabel('place_of_worship'), 'Place of worship');
+assert.equal(typeLabel('cafe'), 'Cafe');
+assert.equal(typeLabel(''), '');
+assert.deepEqual(['restaurant', 'convenience', 'park', 'police', 'nonsense', ''].map(groupOf), ['food', 'shop', 'outdoors', 'other', 'other', 'other']);
 
 // ---- coverage: the circle has the right number of cells, and a walked patch is a tiny part of it
 const cellArea = (CELL * M_PER_DEG) ** 2 * Math.cos(SUTD[0] * Math.PI / 180);          // square metres per cell
@@ -98,6 +106,11 @@ assert(real.every((p) => !['parking', 'bench', 'toilets', 'park_connector'].incl
 assert.equal(new Set(real.map((p) => `${p.name}|${p.lat.toFixed(3)}|${p.lng.toFixed(3)}`)).size, real.length, 'no near-duplicates');
 assert(real.every((p) => /^(node|way|relation)\/\d+$/.test(p.id ?? '')), 'every place has its OpenStreetMap object id');
 assert.equal(new Set(real.map((p) => p.id)).size, real.length, 'ids are unique');
+const groups = { food: 0, shop: 0, outdoors: 0, other: 0 };
+for (const p of real) groups[groupOf(p.type)]++;
+assert(groups.food > 20 && groups.shop > 20 && groups.outdoors > 5, `every pin kind is used: ${JSON.stringify(groups)}`);
+assert(groups.other < real.length * 0.4, `"everything else" is the minority: ${JSON.stringify(groups)}`);
+assert(real.every((p) => typeLabel(p.type).length > 0), 'every place has a readable type');
 assert.equal(file.center.lat, SUTD[0]); assert.equal(file.center.lng, SUTD[1]); assert.equal(file.radius, AREA_RADIUS);   // the fetch script and config agree
 
 console.log('ok');

@@ -25,3 +25,9 @@ export const STORE_KEY = 'fogwalk:v1';    // bump the version when the stored fo
 export const AREA_RADIUS = 2000;          // metres around SUTD: the neighbourhood that "% explored" is measured against (same as tools/fetch-places.mjs)
 export const TOAST_MS = 4000;             // how long a "Found: ..." message stays up
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
+
+// Look and feel
+export const STALE_GPS_MS = 30000;        // no GPS fix for this long: ask the device for one position; if that fails too, the dot goes hollow and a message says so
+export const PROBE_TIMEOUT_MS = 8000;     // how long that one-off position request may take
+export const MAX_FOG_PIXELS = 4_000_000;  // the fog canvas never exceeds this many pixels (phones refuse big canvases); sharpness is lowered to fit
+export const CHIME_HZ = [659, 880];       // the "found" chime: E5, then A5

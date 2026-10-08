@@ -2,11 +2,13 @@
 import { map } from './map.ts';
 import * as me from './me.ts';
 import { say, showDebugBadge } from './ui.ts';
-import { startGps } from './gps.ts';
+import { startGps, probe } from './gps.ts';
 import { startDebugWalk } from './debugWalk.ts';
 import * as fogLayer from './fogLayer.ts';
 import * as storage from './storage.ts';
 import * as discovery from './discovery.ts';
+import * as hud from './hud.ts';
+import * as sound from './sound.ts';
 import { MAX_ACCURACY, ROUGH_HINT_DELAY } from './config.ts';
 import type { Fix } from './types.ts';
 
@@ -15,6 +17,7 @@ const storeKey = storage.storeKey(debug !== null);
 fogLayer.load(storage.readFog(storeKey));            // bring back earlier progress before the first fix
 const saver = storage.createSaver(storeKey, fogLayer.snapshot);
 
+hud.init(sound.isOn(), sound.setOn);
 discovery.start(import.meta.env.BASE_URL + 'places.json');   // starts loading right away; places already in restored fog appear quietly
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
@@ -37,6 +40,7 @@ function onFix(fix: Fix) {
 
 if (debug === null) {
   say('Finding you…');
+  me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
   showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again

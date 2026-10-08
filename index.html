@@ -10,11 +10,19 @@
 <body>
 <div id="map"></div>
 <div id="top">
-  <div id="hud" role="group" aria-label="Progress"></div>
+  <button id="chip" type="button" aria-label="Progress: 0 found" aria-expanded="false" aria-controls="stats"><span id="chipText">0 found</span></button>
+  <section id="stats" aria-label="Progress" hidden>
+    <p id="statsPlaces"></p>
+    <p id="statsArea"></p>
+    <p id="statsLast"></p>
+    <button id="soundSwitch" type="button" role="switch" aria-checked="true">Sound<span class="state" aria-hidden="true">✓ on</span></button>
+  </section>
   <div id="status" role="status"></div>
 </div>
-<div id="toast" role="status"></div>
-<button id="recentre" aria-label="Centre on me">⊕</button>
+<div id="toast" role="status"><strong id="toastTitle"></strong><span id="toastDetail"></span></div>
+<button id="recentre" type="button" aria-label="Centre on me">
+  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+</button>
 
 <script>
 // Safety net: if the app script fails to load or run, say so instead of leaving a blank page.

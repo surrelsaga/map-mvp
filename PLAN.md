@@ -28,12 +28,13 @@ src/
   discovery.ts      places + found state + % explored; toast, vibrate, HUD refresh   ✅ phase 4
   placesLayer.ts    pins + popups for found places (Leaflet)             ✅ phase 4
   coverage.ts       PURE: the 2 km circle as cells, % explored             ✅ phase 4
-  hud.ts            % explored + places-found display (DOM)               ✅ phase 4
+  hud.ts            the "3 found" chip, the stats panel it opens, the sound switch   ✅ phase 4/5
+  sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
   api.ts            window.fogMap quest interface                         phase 6
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
 tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
-tests/fog.test.ts, storage.test.ts, places.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage) and for the shipped places.json (Node 24 runs the TypeScript directly)
+tests/fog.test.ts, storage.test.ts, places.test.ts, design.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage), the shipped places.json and the palette's contrast (Node 24 runs the TypeScript directly)
 tests/browser.mjs   dev-only headless-Chrome regression suite (`npm run test:browser`, puppeteer-core); not part of `npm test` or CI
 ```
 
@@ -96,23 +97,25 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 - Names: control characters become a space; direction marks, zero-width, soft-hyphen and tag characters are removed (written as `\u` escapes in `places.ts`, never as raw invisible characters).
 - Check: a debug walk to the SUTD Canteen (91 m from the start) shows "Found: SUTD Canteen" and its pin. Covered by `npm run test:browser` against the real data.
 
-**5. UI design pass**
-- Use the `frontend-design` skill. First a short token plan (4–6 colours, typeface, layout as an ASCII wireframe) for your review, then the build.
-- Brief: outdoor use in Singapore sunlight, glanced at rather than stared at. Phone-first, with the map as the hero and the HUD as small as possible. The one bold element is the fog and its cleared edge.
-- Starting wireframe:
-  ```
-  ┌──────────────────────┐
-  │ 12% explored  7 found│  ← one slim HUD pill
-  │░░░░░░░░░░░░░░░░░░░░░░│
-  │░░░░░░░    ●   ░░░░░░░│  ← cleared trail, dot
-  │░░░░░░░  ☕     ░░░░░░│  ← discovered place
-  │░░░░░░░░░░░░░░░░░░░░░░│
-  │ [Found: Changi Village…]  ⊕ │ ← toast, recentre
-  └──────────────────────┘
-  ```
-- Fog look (all deliberately plain in Phase 2): fog opacity is 0.9, so the map is faintly visible underneath, including street names. Decide whether unexplored streets should be hidden fully. The cleared edge is scalloped (cell-sized bumps). Add more feather or a blur. The canvas is CSS-pixel resolution, so on 2x/3x phone screens use `devicePixelRatio` for a crisp edge (the canvas is already padded to 4x area, so check redraw cost).
-- Stale-GPS cue: dim the dot when no fix has arrived for ~30 s (tunnels, covered walkways), so a frozen dot isn't mistaken for live.
-- Check: screenshots on the laptop plus a look on the phone outdoors.
+**5. UI design pass** ✅ built, awaiting your check (on the phone, outdoors)
+Idea: *lights come on where you walk.* Unexplored streets sit under deep blue pre-dawn fog; where you've walked the map is full colour, and the cleared edge glows warm gold. Found places use the same gold, so gold always means "discovered". The glowing edge is the one bold element; everything else stays small.
+- Colours: fog `#22304A` (~90%), first light `#F2B33D` (cleared-edge glow, pins, the find moment, nothing else), fog panel `#1A2538` (stats, messages, popups), daylight `#EEF3F8` (text), dusk `#93A3BA` (secondary text), you `#2F7DF6` (the familiar maps-blue dot).
+- Type: Atkinson Hyperlegible Next, regular + bold, self-hosted in `public/` (~50 KB; no Google Fonts call). Text at least 16 px, tabular digits, sentence case only (no all-caps labels, no middle-dot separators).
+- Glance view: one small chip top-left, "3 found". Tapping it opens the stats panel: "3 of 283 places found", "0.04% of the area", "Last: SUTD Canteen", plus a sound on/off toggle. Recentre is a drawn crosshair button, bottom-right, only after you pan away.
+- Find moment (the only animation): the new pin lights up with one gold pulse and a message rises from the bottom: "Found SUTD Canteen" / "Restaurant" (several: "Found 3 places: SUTD Canteen, Gomgom and 1 more"). A short two-note chime made in the browser (no audio file), on by default, works after the first tap, follows the iPhone silent switch; vibration stays for Android. Reduced motion: plain fade.
+- Pins: gold disc with a small hand-drawn SVG icon for four groups (food & drink, shops, parks & play, everything else). Popup: name in bold, type in plain words ("Fast food").
+- GPS states: one line under the chip ("Weak GPS (±90 m). Fog clears within 50 m."). After 30 s without a fix the app asks the device for one position first (some phones send no updates while you stand still); only if that fails too does the dot dim (a grey dot with a dark outline, visible on the pale map and the dark fog) and the message read "No GPS signal. Showing where you last were." While lost it asks again only every 30 s (battery).
+- Fog rendering: gold rim along the cleared edge, smoother (less scalloped) edge, sharp on 2x/3x screens (`devicePixelRatio`).
+- No soft grey drop shadows (dark panels on a bright map don't need them); chips and buttons fully round, message and popup squarer. Tap targets at least 44 px.
+- Checked against generic looks: dark + one accent is a common default, kept because it is functional (contrast with pale tiles in sun, the "lights on" idea, gold only for discoveries); fog is slate blue, not near-black, and gold is never used on buttons. The "big number + small label" stat was dropped: "0.04%" is discouraging at a glance, so the chip shows places found.
+- Touches: `src/style.css`, `index.html`, `src/fogLayer.ts`, `src/placesLayer.ts`, `src/hud.ts`, `src/me.ts`, `src/ui.ts`, a small `src/sound.ts`, font files in `public/`.
+- As built (small differences from the plan): fog is `rgba(31,44,69,0.95)` (deeper than first planned, because at 0.9 street names were still easy to read in unexplored areas); the cleared-edge glow is a gold-tinted sprite drawn onto the fog before the cells are cleared, so the rim sits just outside the cleared area; the fog canvas is scaled by screen density but capped at 4 million pixels (a 2x phone gets ~1.8x, a 3x phone is capped lower); the toast is `Found <name>` with the type underneath, and several finds read `Found 3 places: A, B and 1 more`; sound preference is stored in localStorage under `fogwalk:sound`; the weak-GPS and no-GPS messages sit in the same column as the chip and panel.
+- Palette lives only in `src/style.css` (CSS custom properties); `src/theme.ts` lets the canvas and Leaflet code read it from there, and `tests/design.test.ts` guards the contrast of text, gold marks, the dimmed dot and the focus ring, and fails if a palette colour is repeated in a `.ts` file. Gold is only used for discoveries.
+- Fog drawing cost: the canvas travels with the map pane, so panning redraws only when the view nears the padded canvas's edge (or the zoom changes, e.g. a pinch); the gold glow is drawn only for boundary cells; a redraw with 6,400 cleared cells takes ~7 ms on a laptop (was ~21 ms before these changes).
+- Accessibility: the chip's name is "Progress: N found" open or closed; the sound switch's name is "Sound" with its state in `aria-checked`; focus rings are two-tone (dark line + light band) so they show on both the pale map and the dark panels; reduced motion also switches off Leaflet's zoom, fade and follow-pan animations.
+- Known limits: the stats panel closes on a tap on the map and on Escape; after a tap on the map keyboard focus is wherever the browser puts it (the map itself, which is focusable). Tab order starts at the map, then the chip.
+- Not verified here: the chime on a real iPhone (including whether it follows the silent switch: Web Audio on iOS may or may not be muted by it; treat the chime as a bonus, the toast is the real feedback) and everything outdoors in sunlight. Tab order starts at the map itself (Leaflet makes it focusable for arrow-key panning), then the chip. The font draws zero with a slash on purpose (a legibility feature), so "0 found" reads `Ø found`-style.
+- Check: screenshots at phone size (and 320 px wide), the full browser suite, and a look on the phone outdoors.
 
 **6. Quest interface (later, once quests are decided)**
 - `src/api.ts` grows the `window.fogMap` handle (already `{ map, where }`) into `{ where(), isRevealed(lat,lng), reached(lat,lng,m), marker(lat,lng,label) }`. It's a thin wrapper over phase 1–4 modules, so it doesn't steer the earlier phases. Give `window.fogMap` its public type here (it is already typed as `FogMapApi` in `main.ts`).

@@ -6,25 +6,30 @@ import * as placesLayer from './placesLayer.ts';
 import * as coverage from './coverage.ts';
 import * as hud from './hud.ts';
 import * as fog from './fog.ts';
+import * as sound from './sound.ts';
 import { toast } from './ui.ts';
 import { SUTD, AREA_RADIUS, PLACES_RETRY_MS } from './config.ts';
 
 let placeList: places.Place[] = [];
 const found = new Set<number>();
+let last: string | null = null;                     // the most recent find this session (not remembered across reloads)
 let area: fog.Cells | null = null;                   // the 2 km circle as cells; built just after first paint (it takes tens of ms)
 
 function refresh() {
   if (!area) return;
-  hud.showStats(coverage.formatPercent(fogLayer.countIn(area) / area.size), found.size, placeList.length);   // ponytail: counts all cleared cells (~1x/s); keep a running count if that shows in a profile
+  hud.showStats({ found: found.size, total: placeList.length, percent: coverage.formatPercent(fogLayer.countIn(area) / area.size), last });   // ponytail: counts all cleared cells (~1x/s); keep a running count if that shows in a profile
 }
 
 // Finds places under newly cleared fog. `announce` picks which finds get a toast (all of them by default).
 function check(announce: (p: places.Place) => boolean = () => true) {
   const fresh = places.discover(placeList, found, fogLayer.isRevealed);
-  fresh.forEach(placesLayer.addPlace);
-  const news = fresh.filter(announce);
+  const news = fresh.filter(announce);                                  // decided once: the toast and the pulse always agree
+  const loud = new Set(news);
+  fresh.forEach((p) => placesLayer.addPlace(p, loud.has(p)));          // announced finds also get the gold pulse
   if (news.length) {
-    toast(places.foundMessage(news));
+    last = news[news.length - 1].name;
+    toast(places.foundMessage(news), news.length === 1 ? places.typeLabel(news[0].type) : '');
+    sound.chime();                                                      // silent until the first tap, and when muted
     if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(60);   // browsers ignore (and warn about) vibration before the first tap; iPhones have none
   }
   refresh();

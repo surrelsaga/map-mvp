@@ -33,14 +33,33 @@ export function discover(places: Place[], found: Set<number>, isRevealed: (lat: 
   return fresh;
 }
 
-// What the toast says: "Found: A", "Found: A and B", "Found: A, B and 3 more". Chains repeat names, so equal names are counted: "7-Eleven ×2".
+// What the toast says: "Found A", "Found 2 places: A and B", "Found 5 places: A, B and 3 more". Chains repeat names, so equal names are counted: "7-Eleven ×2".
 export function foundMessage(found: Place[]): string {
+  if (!found.length) return '';
+  if (found.length === 1) return `Found ${found[0].name}`;
   const groups = new Map<string, number>();
   for (const p of found) groups.set(p.name, (groups.get(p.name) ?? 0) + 1);
   const shown = [...groups].slice(0, 2);
-  if (!shown.length) return '';
   const label = ([name, n]: [string, number]) => (n > 1 ? `${name} ×${n}` : name);
   const more = found.length - shown.reduce((sum, [, n]) => sum + n, 0);
   const text = shown.map(label);
-  return 'Found: ' + (more ? `${text.join(', ')} and ${more} more` : text.join(' and '));
+  return `Found ${found.length} places: ` + (more ? `${text.join(', ')} and ${more} more` : text.join(' and '));
+}
+
+// OpenStreetMap values in plain words: "fast_food" -> "Fast food".
+export function typeLabel(type: string): string {
+  const words = type.replace(/_/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// Four kinds of pin. The data only keeps the value (not whether it was a shop or an amenity), so these are lists of values; anything unknown is "other".
+export type Group = 'food' | 'shop' | 'outdoors' | 'other';
+const GROUPS: Record<Exclude<Group, 'other'>, Set<string>> = {
+  food: new Set(['restaurant', 'cafe', 'fast_food', 'food_court', 'bar', 'pub', 'bakery', 'ice_cream', 'coffee', 'beverages', 'confectionery', 'biergarten', 'deli', 'pastry', 'tea', 'juice_bar', 'seafood', 'butcher', 'greengrocer']),
+  shop: new Set(['convenience', 'supermarket', 'clothes', 'shoes', 'variety_store', 'mall', 'department_store', 'electronics', 'computer', 'mobile_phone', 'books', 'florist', 'cosmetics', 'furniture', 'hairdresser', 'pet', 'watches', 'general', 'kiosk', 'beauty', 'gift', 'jewelry', 'optician', 'stationery', 'toys', 'sports', 'bicycle', 'chemist', 'massage', 'laundry', 'dry_cleaning', 'copyshop', 'tailor', 'bag', 'hardware', 'art', 'craft', 'pharmacy', 'bank', 'atm', 'car_repair', 'storage_rental', 'second_hand']),
+  outdoors: new Set(['park', 'playground', 'garden', 'golf_course', 'sports_centre', 'fitness_centre', 'nature_reserve', 'recreation_ground', 'pitch', 'swimming_pool', 'water_park', 'dog_park', 'fitness_station', 'marina', 'stadium', 'miniature_golf', 'amusement_arcade', 'attraction', 'viewpoint', 'picnic_site', 'zoo', 'theme_park']),
+};
+export function groupOf(type: string): Group {
+  for (const [group, values] of Object.entries(GROUPS)) if (values.has(type)) return group as Group;
+  return 'other';
 }

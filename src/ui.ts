@@ -11,14 +11,15 @@ export function showDebugBadge(onReset: () => void) {   // so a simulated positi
   $('debugReset').onclick = onReset;
 }
 
-// A short message that fades after TOAST_MS ("Found: ..."). Separate from `say`, which is for lasting state like GPS problems.
+// A short message that fades after TOAST_MS ("Found SUTD Canteen" with its type underneath). Separate from `say`, which is for lasting state like GPS problems.
 let toastTimer: ReturnType<typeof setTimeout> | 0 = 0;
-export function toast(msg: string) {
-  $('toast').textContent = msg;
+export function toast(title: string, detail = '') {
+  $('toastTitle').textContent = title;
+  $('toastDetail').textContent = detail;
   $('toast').classList.add('show');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     $('toast').classList.remove('show');
-    toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 400);   // after the fade: empty again, so a stale message isn't left for screen readers and the next one is a change
+    toastTimer = setTimeout(() => { $('toastTitle').textContent = ''; $('toastDetail').textContent = ''; }, 400);   // after the fade: empty again, so a stale message isn't left for screen readers and the next one is a change
   }, TOAST_MS);
 }

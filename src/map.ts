@@ -3,7 +3,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { SUTD, START_ZOOM, MIN_ZOOM, MAX_ZOOM, TILE_URL } from './config.ts';
 
-export const map = L.map('map', { zoomControl: false, minZoom: MIN_ZOOM }).setView(SUTD, START_ZOOM);
+// With reduced motion on, the map itself stops animating too (zoom, fades, and the pan that follows you), not just our own flourishes.
+export const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const map = L.map('map', { zoomControl: false, minZoom: MIN_ZOOM, zoomAnimation: !calm, fadeAnimation: !calm, markerZoomAnimation: !calm }).setView(SUTD, START_ZOOM);
 map.attributionControl.setPosition('bottomleft');   // keep the OSM credit clear of the recentre button
 L.tileLayer(TILE_URL, {
   maxZoom: MAX_ZOOM,
