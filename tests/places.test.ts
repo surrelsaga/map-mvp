@@ -2,7 +2,7 @@
 /// <reference types="node" />
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parsePlaces, discover, foundMessage, typeLabel, groupOf, type Place } from '../src/places.ts';
+import { parsePlaces, discover, foundMessage, typeLabel, groupOf, countsByGroup, placeKey, type Place } from '../src/places.ts';
 import { circleCells, formatPercent } from '../src/coverage.ts';
 import { revealPath, dist, M_PER_DEG } from '../src/fog.ts';
 import { CELL, SUTD, AREA_RADIUS } from '../src/config.ts';
@@ -72,6 +72,10 @@ assert.equal(typeLabel('fast_food'), 'Fast food');
 assert.equal(typeLabel('place_of_worship'), 'Place of worship');
 assert.equal(typeLabel('cafe'), 'Cafe');
 assert.equal(typeLabel(''), '');
+assert.equal(typeLabel('atm'), 'ATM', 'acronyms keep their capitals');
+for (const [odd, label] of [['constructor', 'Constructor'], ['toString', 'ToString'], ['__proto__', 'Proto'], ['valueOf', 'ValueOf']]) assert.equal(typeLabel(odd), label, `${odd} is just a word, not a property lookup`);
+assert.equal(placeKey({ name: 'A', type: 'x', lat: 1, lng: 2, id: 'node/5' }), 'node/5', 'a place is known by its OpenStreetMap id');
+assert.equal(placeKey({ name: 'A', type: 'x', lat: 1, lng: 2 }), 'A|1|2', 'or by name and spot when it has none');
 assert.deepEqual(['restaurant', 'convenience', 'park', 'police', 'nonsense', ''].map(groupOf), ['food', 'shop', 'outdoors', 'other', 'other', 'other']);
 
 // ---- coverage: the circle has the right number of cells, and a walked patch is a tiny part of it
@@ -111,6 +115,14 @@ for (const p of real) groups[groupOf(p.type)]++;
 assert(groups.food > 20 && groups.shop > 20 && groups.outdoors > 5, `every pin kind is used: ${JSON.stringify(groups)}`);
 assert(groups.other < real.length * 0.4, `"everything else" is the minority: ${JSON.stringify(groups)}`);
 assert(real.every((p) => typeLabel(p.type).length > 0), 'every place has a readable type');
+const all = countsByGroup(real, new Set());
+assert.equal(all.food.total + all.shop.total + all.outdoors.total + all.other.total, real.length, 'every place is in exactly one group');
+assert.deepEqual([all.food.found, all.shop.found, all.outdoors.found, all.other.found], [0, 0, 0, 0], 'nothing found yet');
+const firstFood = real.findIndex((p) => groupOf(p.type) === 'food'), firstShop = real.findIndex((p) => groupOf(p.type) === 'shop');
+const some = countsByGroup(real, new Set([firstFood, firstShop, real.length - 1]));
+assert.equal(some.food.found + some.shop.found + some.outdoors.found + some.other.found, 3, 'found places are counted in their own groups');
+assert(some.food.found >= 1 && some.shop.found >= 1, 'food and shop each got theirs');
+assert.equal(some.food.total, all.food.total, 'totals do not change with what is found');
 assert.equal(file.center.lat, SUTD[0]); assert.equal(file.center.lng, SUTD[1]); assert.equal(file.radius, AREA_RADIUS);   // the fetch script and config agree
 
 console.log('ok');

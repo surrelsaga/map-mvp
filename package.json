@@ -10,7 +10,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc",
-    "test": "node tests/fog.test.ts && node tests/storage.test.ts && node tests/places.test.ts && node tests/design.test.ts && node tests/gps.test.ts",
+    "test": "node tests/fog.test.ts && node tests/storage.test.ts && node tests/places.test.ts && node tests/design.test.ts && node tests/gps.test.ts && node tests/today.test.ts",
     "test:browser": "node tests/browser.mjs"
   },
   "dependencies": {

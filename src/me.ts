@@ -56,5 +56,7 @@ export function update({ lat, lng, accuracy }: Fix) {
   if (following) map.panTo(me, { animate: !calm });  // keeps the user's zoom; a map they dragged away stays put
 }
 
-map.on('dragstart', () => { following = false; showRecentre(true); });
+// Following stops when you move the map yourself, or when something else takes it somewhere (the stats card's "Last" row).
+export function stopFollowing() { following = false; showRecentre(true); }
+map.on('dragstart', stopFollowing);
 onRecentre(() => { following = true; showRecentre(false); if (me) map.panTo(me, { animate: !calm }); });

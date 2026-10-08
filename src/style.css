@@ -18,28 +18,85 @@ html, body { margin: 0; overflow: hidden; }
 /* two tones, so the focus ring shows on the pale map and on the dark panels: a light band with a dark line outside it */
 :focus-visible { outline: 3px solid var(--panel); outline-offset: 4px; box-shadow: 0 0 0 4px var(--daylight); }
 
-/* top-left stack: the chip, the stats it opens, and the GPS message */
+/* top-left stack: the chip, the first-open hint, the stats card, and the GPS message */
 #top {
   position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right));
   top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none;   /* the pieces stack, whatever their height */
 }
-#chip, #stats, #status { font-family: var(--ui); color: var(--daylight); background: var(--panel); }
+#chip, #stats, #status, #hint { font-family: var(--ui); color: var(--daylight); background: var(--panel); }
+#top button { touch-action: manipulation; cursor: pointer; }
+/* a press tints the control; nothing moves or scales, so nothing around it shifts */
+#chip:active, #lastFind:active, #soundSwitch:active { background-image: linear-gradient(rgba(238, 243, 248, 0.12), rgba(238, 243, 248, 0.12)); }   /* a tint, not a shadow: the focus ring keeps its shadow while pressed */
+
 #chip {
-  pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 22px;
-  font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
+  pointer-events: auto; display: inline-flex; align-items: center; gap: 10px; box-sizing: border-box; min-height: 48px; padding: 0 14px 0 10px;
+  border: 1.5px solid var(--dusk); border-radius: 24px;                   /* a visible edge (3:1 against the fog) says "this is a button" */
+  font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
-#chip::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--first-light); }
-#stats { pointer-events: auto; box-sizing: border-box; max-width: min(100%, 320px); padding: 14px 18px; border-radius: 14px; font-size: 16px; line-height: 1.4; }
-#stats p { margin: 0 0 4px; }
-#stats #statsPlaces { font-weight: 700; }
-#stats #statsArea, #stats #statsLast { color: var(--dusk); }
-#stats p:empty { display: none; }
-#soundSwitch {
-  margin-top: 8px; min-height: 44px; padding: 0 16px; border: 2px solid var(--dusk); border-radius: 22px; background: none; color: var(--daylight);
-  font: 700 16px var(--ui); cursor: pointer;
+#chip { max-width: 100%; }
+#chipText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* a long label (large text) shortens instead of pushing the chip off screen */
+.chev, .chev-right { flex: none; fill: none; stroke: var(--dusk); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.chev { transition: transform .18s ease-out; }
+#chip[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+/* the goal ring: a gold arc that fills as today's goal is met, and a check mark once it is */
+.ring { flex: none; display: block; }
+.ring circle, .ring path { fill: none; stroke-width: 3.5; }
+.ring-track { stroke: var(--dusk); opacity: 0.35; }
+.ring-arc { stroke: var(--first-light); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0; transition: stroke-dashoffset .6s ease-out, opacity .2s; }   /* the circle's length is 1 (pathLength): hud.ts sets the offset from 1 (empty) to 0 (full) */
+.ring-check { stroke: var(--first-light); stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity .3s; }
+.ring.done .ring-check { opacity: 1; }
+
+#hint {
+  box-sizing: border-box; max-width: min(100%, 320px); margin: 0; padding: 10px 14px; border: 1.5px solid rgba(147, 163, 186, 0.5); border-radius: 14px;
+  font-size: 16px; line-height: 1.35; pointer-events: none;               /* a tap goes through to the map, and dismisses it */
 }
-#soundSwitch .state { margin-left: 0.4em; }                              /* spacing in CSS, so the button's accessible name is exactly "Sound" */
+#hint[hidden] { display: none; }
+
+#stats {
+  pointer-events: auto; box-sizing: border-box; width: min(100%, 340px); padding: 16px; border: 1px solid rgba(147, 163, 186, 0.35); border-radius: 18px;
+  font-size: 16px; line-height: 1.35; animation: card-in .18s ease-out;
+  max-height: calc(100vh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain;   /* on a short screen the card scrolls instead of being cut off; 150 px leaves room for the chip above it and a GPS message below it */
+}
+@supports (height: 100dvh) { #stats { max-height: calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); } }   /* the visible height, as the address bar comes and goes */
+#stats[hidden] { display: none; }
+@keyframes card-in { from { opacity: 0; transform: translateY(-6px); } }
+#stats p { margin: 0; }
+.goal { display: flex; align-items: center; gap: 14px; }
+#goalTitle { font-size: 20px; font-weight: 700; }
+#goalText { color: var(--dusk); }
+.block { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(147, 163, 186, 0.25); }
+#stats #statsPlaces { margin-bottom: 12px; font-weight: 700; }   /* the id is repeated: `#stats p` would otherwise win and zero the margin */
+#groups { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+#groups li { display: grid; grid-template-columns: 24px 1fr 84px; align-items: center; gap: 12px; }   /* a count column of one width (room for "128 of 128"), so every bar ends at the same place */
+.g-body { display: block; min-width: 0; }
+.g-name { display: block; font-size: 15px; }
+.g-count { text-align: right; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#stats #statsArea { margin-bottom: 8px; }
+/* bars: a gold fill on a faint track; the exact number is always written next to them */
+.bar { display: block; height: 6px; margin-top: 6px; overflow: hidden; border-radius: 3px; background: rgba(147, 163, 186, 0.28); }
+#statsArea + .bar { margin-top: 0; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--first-light); transform: scaleX(0); transform-origin: left; transition: transform .5s ease-out; }
+
+#lastFind, #soundSwitch {
+  display: flex; align-items: center; gap: 10px; box-sizing: border-box; width: 100%; min-height: 52px; margin-top: 14px; padding: 0 4px;
+  border: 0; border-top: 1px solid rgba(147, 163, 186, 0.25); border-radius: 0; background: none; color: var(--daylight); font: 400 16px/1.3 var(--ui); text-align: left;
+}
+#lastFind[hidden] { display: none; }
+.diamond { flex: none; width: 8px; height: 8px; background: var(--first-light); transform: rotate(45deg); }
+.last-text { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 8px 0; }
+#statsLast, #lastType { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#statsLast { font-weight: 700; }
+#lastType { color: var(--dusk); font-size: 15px; }
+#soundSwitch { justify-content: space-between; margin-top: 0; font-weight: 700; }
+.switch-state { display: flex; align-items: center; gap: 10px; }
+.switch-state .state { color: var(--dusk); font-weight: 400; }
+.track { position: relative; box-sizing: border-box; width: 46px; height: 28px; border: 1.5px solid var(--dusk); border-radius: 14px; transition: background-color .15s, border-color .15s; }
+.thumb { position: absolute; top: 2.5px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--dusk); transition: transform .15s ease-out, background-color .15s; }
+#soundSwitch[aria-checked="true"] .track { border-color: var(--you); background: var(--you); }
+#soundSwitch[aria-checked="true"] .thumb { background: var(--daylight); transform: translateX(18px); }
+
 #status { align-self: stretch; padding: 10px 14px; border-radius: 14px; font-size: 16px; line-height: 1.35; }
 #status:empty { height: 0; padding: 0; overflow: hidden; }   /* collapsed but still in the page, so screen readers announce text changes */
 
@@ -63,7 +120,7 @@ html, body { margin: 0; overflow: hidden; }
 
 /* places you have found: a gold disc with a small line icon; the box is a finger-sized tap target */
 .place-pin { display: grid; place-items: center; }
-.place-pin .place-disc {
+.place-disc {
   display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; box-sizing: border-box;
   background: var(--first-light); color: var(--panel); border: 2px solid var(--panel);
 }
@@ -92,5 +149,7 @@ html, body { margin: 0; overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   #toast { transform: none; transition: opacity .2s; }
+  #stats { animation: none; }
+  .ring-arc, .ring-check, .bar > span, .chev, .track, .thumb { transition: none; }
   .place-pin.is-new .place-disc { animation: none; }
 }

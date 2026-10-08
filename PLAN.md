@@ -28,13 +28,16 @@ src/
   discovery.ts      places + found state + % explored; toast, vibrate, HUD refresh   ✅ phase 4
   placesLayer.ts    pins + popups for found places (Leaflet)             ✅ phase 4
   coverage.ts       PURE: the 2 km circle as cells, % explored             ✅ phase 4
-  hud.ts            the "3 found" chip, the stats panel it opens, the sound switch   ✅ phase 4/5
+  hud.ts            the goal chip, the stats card it opens, the sound switch, the first-open hint   ✅ phase 4/5/5b
+  today.ts          PURE + store: today's finds and the daily goal   ✅ phase 5b
+  flags.ts          a remembered yes/no (hint dismissed)   ✅ phase 5b
+  icons.ts          pin icons shared by the map and the stats card   ✅ phase 5b
   sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
   api.ts            window.fogMap quest interface                         phase 6
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
 tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
-tests/fog.test.ts, storage.test.ts, places.test.ts, design.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage), the shipped places.json and the palette's contrast (Node 24 runs the TypeScript directly)
+tests/fog.test.ts, storage.test.ts, places.test.ts, design.test.ts, gps.test.ts, today.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage), the shipped places.json and the palette's contrast (Node 24 runs the TypeScript directly)
 tests/browser.mjs   dev-only headless-Chrome regression suite (`npm run test:browser`, puppeteer-core); not part of `npm test` or CI
 ```
 
@@ -116,6 +119,56 @@ Idea: *lights come on where you walk.* Unexplored streets sit under deep blue pr
 - Known limits: the stats panel closes on a tap on the map and on Escape; after a tap on the map keyboard focus is wherever the browser puts it (the map itself, which is focusable). Tab order starts at the map, then the chip.
 - Not verified here: the chime on a real iPhone (including whether it follows the silent switch: Web Audio on iOS may or may not be muted by it; treat the chime as a bonus, the toast is the real feedback) and everything outdoors in sunlight. Tab order starts at the map itself (Leaflet makes it focusable for arrow-key panning), then the chip. The font draws zero with a slash on purpose (a legibility feature), so "0 found" reads `Ø found`-style.
 - Check: screenshots at phone size (and 320 px wide), the full browser suite, and a look on the phone outdoors.
+
+**5b. Stats block redesign** ✅ built, awaiting your check
+The main goal is still a working map that tracks your discoveries. This makes the stats look more professional, use less text, and invite a tap for the details. The daily goal ring is there to make the chip worth tapping; it isn't a feature in itself.
+- **Chip (top-left, 48 px):** it explains itself, and a tap adds detail rather than meaning: "Find 3 places today", then "2 of 3 places today", then "Today's goal done". A gold ring shows progress and fills with a check when done; a chevron turns when the card is open; a visible edge in the `--dusk` colour (3:1 against the fog) says it's a button; a press tints it (an inset shadow) without scaling or moving it.
+- **First open only:** a hint card says "Walk to clear the fog. Places appear as you uncover them." A tap anywhere or the first find dismisses it for good (`fogwalk:hinted`).
+- **Card:**
+  - Today's goal, with a large ring.
+  - "N of 283 places found".
+  - Four rows (Food & drink, Shops, Outdoors, Other), each with the same gold disc and icon as its pins on the map, a bar and "found of total". The count column has a fixed width, so every bar is the same length.
+  - Area as "0.10% of the neighbourhood" with a bar.
+  - "Last: <place>" with its type underneath: tapping it closes the card, pans the map there and opens the place's name.
+  - A real sound switch (track and thumb, name "Sound", state "On"/"Off" as text too).
+- **Bars:** the share found, with a small minimum stub once anything is found (so one find of 128 is still visible); the exact number is always written beside the bar.
+- **Today's goal:**
+  - `DAILY_GOAL = 3` new places, counted by the phone's local date and stored on the device (`fogwalk:today`, a separate key in debug mode).
+  - Only finds that were announced count, so places restored from an earlier visit are not counted again, even when they arrive in the same batch as a new find.
+  - It remembers *which* places were found today (by OpenStreetMap id), not how many, so the same place can never count twice, even if two tabs find it.
+  - The count rolls over at local midnight even if the app stays open.
+  - The find that completes the goal says "Today's goal done" in the message.
+- **Quests later:** the ring is one goal slot, and `discovery.ts` takes the goal from one function (`currentGoal()`). When quests arrive (Phase 6) they take over the slot, so there are never two competing goals.
+- **Modules:**
+  - `src/today.ts` (pure logic plus a small store)
+  - `src/flags.ts` (a remembered yes/no)
+  - `src/icons.ts` (icons shared by the pins and the card)
+  - `countsByGroup` and an acronym fix ("ATM") in `src/places.ts`
+  - richer stats from `src/discovery.ts`
+  - `focusPlace` in `src/placesLayer.ts`
+  - rendering in `src/hud.ts`
+  
+  Only the existing palette and font are used. `tests/design.test.ts` now also checks that gold is used only by discovery elements (the ring, bars, diamond, pin discs and the find pulse).
+- **Deviations from the plan:**
+  - The number does not tick up on a find; the ring sweeps instead.
+  - The card closes instantly (only opening is animated).
+  - The press feedback is a tint, not a scale, per the ui-ux-pro-max rule.
+  - The chip's accessible name is its visible text plus ", progress details".
+  - `focusPlace` waits for the pan to finish before opening the popup: opening it mid-pan made Leaflet fight the pan and stop the map halfway.
+- **Details the review caught:**
+  - Tapping "Last" while walking turns off follow-mode (otherwise the next GPS fix pulls the map back), and keyboard focus goes to the chip.
+  - The ring is a circle of length 1 (`pathLength`) with its arc hidden at zero, so an empty ring leaves no gold speck, and no number is duplicated between CSS and TypeScript.
+  - The goal rolls over at midnight even if the app stays open (re-checked when the app returns to the foreground and once a minute; that check only touches the chip and ring, not the whole map).
+  - Two tabs on one device each count: before adding, a tab combines what it knows with what is stored (a union of place ids), so neither wipes the other's finds, a stale tab from yesterday cannot drag today's count down, and one place found in both counts once.
+  - On a short screen (a phone on its side) the card scrolls instead of being cut off, and leaves room for the GPS message under it.
+  - The ring's arc is a `<path>` (not a `<circle>`), because `pathLength` on circles is not reliable in every browser; it fades in and out as well as sweeping.
+  - "Last" only turns off follow-mode when the map really moves to the place, and waits for the pan to finish before opening the name.
+  - A very long chip label shortens with an ellipsis, and the count column has room for "128 of 128".
+  - The press tint is a background tint, so it never replaces the keyboard focus ring.
+  - Each kind of place is classified once and remembered (the stats are refreshed on every cleared fix).
+- **Known limits:** I could not reproduce the review's worry that tapping "Last" during another pan stops the map short (Leaflet overrides the early popup's pan), so that ordering is kept for safety but is not separately tested; nothing here was run in Safari or Firefox (only Chrome);  the first-open hint and the chip's starting text in `index.html` say "3 places"; JavaScript replaces them straight away, but if `DAILY_GOAL` changes, update the markup too. Changing the phone's time zone can reset today's count.
+- **Tests:** `tests/today.test.ts` and per-group counts in `tests/places.test.ts` (Node), plus a Phase 5b section in `tests/browser.mjs`. Each behaviour was checked by breaking it on purpose.
+- Commit message: `feat: daily goal ring and visual stats card`
 
 **6. Quest interface (later, once quests are decided)**
 - `src/api.ts` grows the `window.fogMap` handle (already `{ map, where }`) into `{ where(), isRevealed(lat,lng), reached(lat,lng,m), marker(lat,lng,label) }`. It's a thin wrapper over phase 1–4 modules, so it doesn't steer the earlier phases. Give `window.fogMap` its public type here (it is already typed as `FogMapApi` in `main.ts`).

@@ -31,3 +31,8 @@ export const STALE_GPS_MS = 30000;        // no GPS fix for this long: ask the d
 export const PROBE_TIMEOUT_MS = 8000;     // how long that one-off position request may take
 export const MAX_FOG_PIXELS = 4_000_000;  // the fog canvas never exceeds this many pixels (phones refuse big canvases); sharpness is lowered to fit
 export const CHIME_HZ = [659, 880];       // the "found" chime: E5, then A5
+
+// Today's goal and the first-open hint
+export const DAILY_GOAL = 3;              // new places to find per day: the goal the chip's ring fills toward (quests will take over this slot)
+export const TODAY_KEY = 'fogwalk:today'; // per-device count of today's finds; debug mode adds ':debug'
+export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open hint has been dismissed

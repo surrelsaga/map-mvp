@@ -7,17 +7,32 @@ import * as coverage from './coverage.ts';
 import * as hud from './hud.ts';
 import * as fog from './fog.ts';
 import * as sound from './sound.ts';
+import * as today from './today.ts';
 import { toast } from './ui.ts';
 import { SUTD, AREA_RADIUS, PLACES_RETRY_MS } from './config.ts';
 
 let placeList: places.Place[] = [];
 const found = new Set<number>();
-let last: string | null = null;                     // the most recent find this session (not remembered across reloads)
+let last: places.Place | null = null;               // the most recent find this session (not remembered across reloads)
 let area: fog.Cells | null = null;                   // the 2 km circle as cells; built just after first paint (it takes tens of ms)
+let todayKey = '', todayState: today.Today = { date: '', ids: [] };
+
+// The places found today, on the phone's local date: what this tab remembers plus whatever is stored (another tab may have counted too).
+// Counting which places, not how many, means the same place never counts twice, however many tabs find it. Asking also rolls over at midnight.
+const countToday = (add: string[] = []) => {
+  const next = today.countToday(new Date(), add, todayState, today.readToday(todayKey));
+  if (next.date !== todayState.date || next.ids.length !== todayState.ids.length) today.writeToday(todayKey, next);
+  return (todayState = next);
+};
+// The one goal the chip's ring shows. When quests arrive, they take over this slot (return their goal here instead).
+const currentGoal = () => today.goalOf(countToday().ids.length);
 
 function refresh() {
-  if (!area) return;
-  hud.showStats({ found: found.size, total: placeList.length, percent: coverage.formatPercent(fogLayer.countIn(area) / area.size), last });   // ponytail: counts all cleared cells (~1x/s); keep a running count if that shows in a profile
+  const fraction = area ? fogLayer.countIn(area) / area.size : 0;       // ponytail: counts all cleared cells (~1x/s); keep a running count if that shows in a profile
+  hud.showStats({
+    goal: currentGoal(), found: found.size, total: placeList.length, groups: places.countsByGroup(placeList, found),
+    percent: coverage.formatPercent(fraction), fraction, last,
+  });
 }
 
 // Finds places under newly cleared fog. `announce` picks which finds get a toast (all of them by default).
@@ -27,8 +42,12 @@ function check(announce: (p: places.Place) => boolean = () => true) {
   const loud = new Set(news);
   fresh.forEach((p) => placesLayer.addPlace(p, loud.has(p)));          // announced finds also get the gold pulse
   if (news.length) {
-    last = news[news.length - 1].name;
-    toast(places.foundMessage(news), news.length === 1 ? places.typeLabel(news[0].type) : '');
+    last = news[news.length - 1];
+    const wasDone = currentGoal().done;
+    countToday(news.map(places.placeKey));
+    const detail = !wasDone && currentGoal().done ? 'Today’s goal done' : news.length === 1 ? places.typeLabel(news[0].type) : '';
+    toast(places.foundMessage(news), detail);
+    hud.dismissHint();                                                  // a first find shows the hint was no longer needed
     sound.chime();                                                      // silent until the first tap, and when muted
     if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(60);   // browsers ignore (and warn about) vibration before the first tap; iPhones have none
   }
@@ -56,7 +75,14 @@ async function loadFile(url: string): Promise<unknown> {
 // Loads the places file. No file just means nothing to discover.
 // Places already inside fog restored from an earlier session show up quietly; anything cleared since this page opened is announced,
 // even if the file arrives late.
-export function start(url: string) {
+export function start(url: string, todayStoreKey: string) {
+  todayKey = todayStoreKey;
+  todayState = today.countToday(new Date(), [], today.readToday(todayKey));   // today's finds from earlier in the day, if the app was closed and reopened
+  refresh();
+  // An app left open overnight must start the new day: look again when it comes back to the foreground, and once a minute.
+  const newDay = () => hud.showGoal(currentGoal());                    // only the goal: no need to recount the whole map for this
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') newDay(); });
+  setInterval(newDay, 60_000);
   const before = new Set(fogLayer.snapshot());
   setTimeout(() => { area = coverage.circleCells({ lat: SUTD[0], lng: SUTD[1] }, AREA_RADIUS); refresh(); }, 0);
   loadFile(url).then(

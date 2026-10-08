@@ -31,9 +31,19 @@ const paleTile = '#f2efe9';                                                  // 
 assert(contrastWith('panel', paleTile) >= 3, 'the dimmed dot\'s dark outline against a pale map tile (non-text, AA)');
 assert(contrastWith('panel', paleTile) >= 3 && contrast(color('daylight'), color('panel')) >= 3, 'the focus ring has a dark line (shows on pale tiles) and a light band (shows on dark panels)');
 
-// gold means "discovered": it is only ever used for the chip dot, the pins, and the find ring
-const goldUses = [...css.matchAll(/var\(--first-light\)|242, 179, 61/g)].length;
-assert(goldUses <= 5, `gold is used sparingly (${goldUses} uses); it is the colour of discoveries only`);
+// gold means "discovered": it may only be used by the elements that show a discovery (the goal ring, bars, the diamond, the pin discs and their pulse)
+const GOLD_OK = new Set(['.ring-arc', '.ring-check', '.bar > span', '.diamond', '.place-disc']);
+const bare = css.replace(/\/\*[^]*?\*\//g, '');                              // the stylesheet without its comments
+const goldRules = [...bare.matchAll(/var\(--first-light\)|242, 179, 61/g)].map((m) => {
+  const before = bare.slice(0, m.index), open = before.lastIndexOf('{');
+  const selector = before.slice(before.lastIndexOf('}', open) + 1, open).trim();
+  const named = selector.match(/@keyframes\s+([\w-]+)/)?.[1];                   // the first step of an animation carries its @keyframes header
+  const keyframes = named ?? (/(^|\s)(\d+%|from|to)$/.test(selector) ? [...before.matchAll(/@keyframes\s+([\w-]+)/g)].at(-1)?.[1] : undefined);
+  return { selector, keyframes };
+});
+assert(goldRules.length >= 5, 'gold is used for the discovery elements');
+for (const { selector, keyframes } of goldRules)
+  assert(GOLD_OK.has(selector) || keyframes === 'found', `gold is only for discoveries, but "${selector}" uses it`);
 
 // one source of truth: the stylesheet defines the palette, and the TypeScript reads it (src/theme.ts) instead of repeating the hex values
 import { readdirSync } from 'node:fs';

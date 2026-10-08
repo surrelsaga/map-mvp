@@ -47,10 +47,14 @@ export function foundMessage(found: Place[]): string {
 }
 
 // OpenStreetMap values in plain words: "fast_food" -> "Fast food".
+const ACRONYMS = new Map([['atm', 'ATM']]);                              // a Map: a plain object would answer to names like "constructor"
 export function typeLabel(type: string): string {
   const words = type.replace(/_/g, ' ').trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  return ACRONYMS.get(words) ?? words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+// A place's identity across visits and tabs: its OpenStreetMap id when it has one.
+export const placeKey = (p: Place) => p.id ?? `${p.name}|${p.lat}|${p.lng}`;
 
 // Four kinds of pin. The data only keeps the value (not whether it was a shop or an amenity), so these are lists of values; anything unknown is "other".
 export type Group = 'food' | 'shop' | 'outdoors' | 'other';
@@ -59,7 +63,20 @@ const GROUPS: Record<Exclude<Group, 'other'>, Set<string>> = {
   shop: new Set(['convenience', 'supermarket', 'clothes', 'shoes', 'variety_store', 'mall', 'department_store', 'electronics', 'computer', 'mobile_phone', 'books', 'florist', 'cosmetics', 'furniture', 'hairdresser', 'pet', 'watches', 'general', 'kiosk', 'beauty', 'gift', 'jewelry', 'optician', 'stationery', 'toys', 'sports', 'bicycle', 'chemist', 'massage', 'laundry', 'dry_cleaning', 'copyshop', 'tailor', 'bag', 'hardware', 'art', 'craft', 'pharmacy', 'bank', 'atm', 'car_repair', 'storage_rental', 'second_hand']),
   outdoors: new Set(['park', 'playground', 'garden', 'golf_course', 'sports_centre', 'fitness_centre', 'nature_reserve', 'recreation_ground', 'pitch', 'swimming_pool', 'water_park', 'dog_park', 'fitness_station', 'marina', 'stadium', 'miniature_golf', 'amusement_arcade', 'attraction', 'viewpoint', 'picnic_site', 'zoo', 'theme_park']),
 };
+const groupCache = new Map<string, Group>();                              // refreshed on every cleared fix, so each type is looked up once
 export function groupOf(type: string): Group {
-  for (const [group, values] of Object.entries(GROUPS)) if (values.has(type)) return group as Group;
-  return 'other';
+  let g = groupCache.get(type);
+  if (!g) {
+    g = 'other';
+    for (const [group, values] of Object.entries(GROUPS)) if (values.has(type)) g = group as Group;
+    groupCache.set(type, g);
+  }
+  return g;
+}
+
+// How many places of each kind exist, and how many of those are found (`found` holds indexes into `places`).
+export function countsByGroup(places: Place[], found: Set<number>): Record<Group, { found: number; total: number }> {
+  const out: Record<Group, { found: number; total: number }> = { food: { found: 0, total: 0 }, shop: { found: 0, total: 0 }, outdoors: { found: 0, total: 0 }, other: { found: 0, total: 0 } };
+  places.forEach((p, i) => { const c = out[groupOf(p.type)]; c.total++; if (found.has(i)) c.found++; });
+  return out;
 }

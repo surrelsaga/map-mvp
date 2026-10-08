@@ -11,9 +11,9 @@ const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/M
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
 const errors = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const open = async (query = '', setup, { permit = true } = {}) => {
-  const ctx = await browser.createBrowserContext();             // fresh context = fresh localStorage
-  if (permit) await ctx.overridePermissions(ORIGIN, ['geolocation']);
+const open = async (query = '', setup, { permit = true, ctx: shared, days = 0 } = {}) => {
+  const ctx = shared ?? await browser.createBrowserContext();   // fresh context = fresh localStorage; pass one in to act as the same device (shared storage)
+  if (permit && !shared) await ctx.overridePermissions(ORIGIN, ['geolocation']);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   await page.setViewport({ width: 390, height: 780, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -27,6 +27,10 @@ const open = async (query = '', setup, { permit = true } = {}) => {
       if (t !== prev) { prev = t; if (t) seen.push(t); }
     }).observe(document, { childList: true, subtree: true, characterData: true });
   });
+  if (days) await page.evaluateOnNewDocument((shift) => {        // the phone's clock, `days` ahead: for "a new day" without waiting for one
+    const Real = Date, ms = shift * 86400000;
+    window.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + ms); } static now() { return Real.now() + ms; } };
+  }, days);
   if (setup) await setup(page);
   await page.goto(BASE + query, { waitUntil: 'networkidle2' });
   return page;
@@ -371,14 +375,14 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   assert.deepEqual(await pins(p), ['Right Here'], 'only the place under the start circle is shown');
   assert.deepEqual(await toasts(p), ['Found Right Here'], 'a place under you when the app opens is a find, so it is announced');
   let st = await stats(p);
-  assert.equal(st.chip, '1 found'); assert.equal(st.places, '1 of 3 places found'); assert.match(st.area, /^\d\.\d\d% of the area$/, 'area: ' + st.area);
+  assert.equal(st.chip, '1 of 3 places today'); assert.equal(st.places, '1 of 3 places found'); assert.match(st.area, /^\d\.\d\d% of the neighbourhood$/, 'area: ' + st.area);
   assert.equal(st.last, 'Last: Right Here');
   const pct0 = parseFloat(st.area);
   await p.mouse.click(195, 330);                                              // walk ~70 m north
   assert(await waitFor(async () => (await toastText(p)) === 'Found Up The Road'), 'a toast names the place when it is reached (toast: ' + (await toastText(p)) + ')');
   assert.deepEqual((await pins(p)).sort(), ['Right Here', 'Up The Road'], 'its pin appears; the far one stays hidden');
   st = await stats(p);
-  assert.equal(st.chip, '2 found'); assert.equal(st.places, '2 of 3 places found'); assert.equal(st.last, 'Last: Up The Road');
+  assert.equal(st.chip, '2 of 3 places today'); assert.equal(st.places, '2 of 3 places found'); assert.equal(st.last, 'Last: Up The Road');
   assert.equal(await p.evaluate(() => document.getElementById('toastDetail').textContent), 'Cafe', 'the toast says what kind of place it is');
   assert(parseFloat(st.area) > pct0, 'explored % went up');
   await sleep(4600);                                                          // TOAST_MS
@@ -404,7 +408,7 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   let st;
   await sleep(300);
   st = await stats(p);
-  assert.equal(st.chip, '0 found'); assert.equal(st.places, '0 places found', 'while loading there is no total yet');
+  assert.equal(st.chip, 'Find 3 places today'); assert.equal(st.places, '0 places found', 'while loading there is no total yet');
   await p.mouse.click(195, 330);
   assert.equal(await waitFor(async () => (await pins(p)).length > 0, 14000), true, 'the pin appears once the file arrives');
   assert.deepEqual(await toasts(p), ['Found Up The Road'], 'and it is announced, not found "quietly"');
@@ -462,7 +466,7 @@ const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) {
   const p = await open('?debug', fakePlaces({ places: [] }));
   await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await p.click('#chip');
-  await p.evaluate(() => { document.getElementById('statsLast').textContent = 'Last: ' + 'A very long place name '.repeat(4); document.getElementById('status').textContent = 'Weak GPS (±90 m). Fog clears within 50 m, try outdoors.'; });
+  await p.evaluate(() => { document.getElementById('lastFind').hidden = false; document.getElementById('statsLast').textContent = 'Last: ' + 'A very long place name '.repeat(4); document.getElementById('status').textContent = 'Weak GPS (±90 m). Fog clears within 50 m, try outdoors.'; });
   const r = await p.evaluate(() => ['chip', 'stats', 'status'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
   assert(r[0].bottom <= r[1].top && r[1].bottom <= r[2].top, `chip, panel and message stack in order (${r.map((x) => `${Math.round(x.top)}-${Math.round(x.bottom)}`)})`);
   assert(r.every((x) => x.left >= 0 && x.right <= 320), 'all three stay inside the screen');
@@ -519,9 +523,9 @@ console.log('Phase 5: look and feel');
   assert(await p.evaluate(() => document.fonts.check('700 16px "Atkinson Hyperlegible Next"') && document.fonts.check('400 16px "Atkinson Hyperlegible Next"')), 'the self-hosted font is loaded');
   assert.match(await p.evaluate(() => getComputedStyle(document.getElementById('chip')).fontFamily), /Atkinson Hyperlegible Next/);
   const named = async (sel) => { const h = await p.$(sel); const n = await p.accessibility.snapshot({ root: h }); return n && { role: n.role, name: n.name, checked: n.checked }; };
-  assert.deepEqual(await named('#chip'), { role: 'button', name: 'Progress: 0 found', checked: undefined }, 'the chip has a stable name that says what its number counts');
+  assert.deepEqual(await named('#chip'), { role: 'button', name: 'Find 3 places today, progress details', checked: undefined }, 'the chip is named by what it says, plus what a tap gives');
   await p.click('#chip');
-  assert.equal((await named('#chip')).name, 'Progress: 0 found', 'and keeps it while the panel is open');
+  assert.equal((await named('#chip')).name, 'Find 3 places today, progress details', 'and keeps it while the card is open');
   await p.click('#chip');
   await p.click('#chip');
   assert.deepEqual(await named('#soundSwitch'), { role: 'switch', name: 'Sound', checked: true }, 'the switch is named "Sound" and its state comes from aria-checked');
@@ -529,7 +533,7 @@ console.log('Phase 5: look and feel');
   assert.notEqual(await p.evaluate(() => document.activeElement.tagName), 'BODY', 'closing the panel with a tap on the map does not drop keyboard focus to the top of the page');
   await p.click('#chip');
   const sizes = await p.evaluate(() => ['chip', 'soundSwitch'].map((id) => document.getElementById(id).getBoundingClientRect().height));
-  assert(sizes.every((h) => h >= 44), `chip and sound switch are at least 44 px tall (${sizes})`);
+  assert(sizes.every((h) => h >= 48), `chip and sound switch are at least 48 px tall (${sizes})`);
   await p.click('#chip');
   await dragMap(p);
   const rb = await p.evaluate(() => document.getElementById('recentre').getBoundingClientRect().toJSON());
@@ -600,9 +604,9 @@ console.log('Phase 5: look and feel');
   assert.equal(await notes(), 2, 'after a tap, a find plays a two-note chime');
   await p.click('#chip');
   const sw = () => p.evaluate(() => [document.getElementById('soundSwitch').getAttribute('aria-checked'), document.querySelector('#soundSwitch .state').textContent].join('|'));
-  assert.equal(await sw(), 'true|✓ on');
+  assert.equal(await sw(), 'true|On');
   await p.click('#soundSwitch');
-  assert.equal(await sw(), 'false|off', 'the switch turns sound off');
+  assert.equal(await sw(), 'false|Off', 'the switch turns sound off');
   await fixAt(1200); await sleep(600);
   assert.deepEqual((await toasts(p)).slice(-1), ['Found Spot 2'], 'finds are still announced on screen');
   assert.equal(await notes(), 2, 'but silently while muted');
@@ -725,6 +729,288 @@ console.log('Phase 5: look and feel');
   assert.deepEqual((await dotOf(racer)).map((d) => d[0]), ['0.1', '1'], 'and the dot stays live');
   for (const p of [lost, still, racer]) await p.close();
   t('stale GPS: lost, standing still, race, back-off ok');
+}
+
+
+console.log('Phase 5b: stats block');
+const ringOffset = (p) => p.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#chip .ring-arc')).strokeDashoffset));
+const RING = 1;                                                                     // the arc is a circle of length 1 (pathLength): an empty ring is offset by all of it
+const chipState = (p) => p.evaluate(() => ({ text: document.getElementById('chipText').textContent, name: document.getElementById('chip').getAttribute('aria-label'), done: document.querySelector('#chip .ring').classList.contains('done') }));
+const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOffset(p)) - RING * (1 - progress)) < 0.01, 3000);
+{ // the chip says what it is; the ring fills toward today's goal; the find that completes it says so
+  const places = [0, 300, 600, 900].map((n, i) => ({ name: `Spot ${i}`, type: 'cafe', lat: S0.lat + dN(n), lng: S0.lng }));
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }); await sleep(800);
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const detail = () => p.evaluate(() => document.getElementById('toastDetail').textContent);
+  assert.deepEqual(await chipState(p), { text: 'Find 3 places today', name: 'Find 3 places today, progress details', done: false }, 'before any find: an instruction, not a number');
+  assert.deepEqual(await p.evaluate(() => { const a = document.querySelector('#chip .ring-arc'), cs = getComputedStyle(a); return [a.tagName.toLowerCase(), a.getAttribute('pathLength'), cs.strokeDasharray, cs.transitionProperty]; }), ['path', '1', '1px', 'stroke-dashoffset, opacity'], 'the arc is a <path> of length 1 (not a <circle>, whose pathLength Safari may ignore) and eases both its sweep and its fade');
+  assert(await ringAt(p, 0), 'the ring starts empty');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .ring-arc')).opacity), '0', 'and draws nothing at all (a round cap would leave a gold speck)');
+  await fixAt(0); await sleep(400);
+  assert.deepEqual(await chipState(p), { text: '1 of 3 places today', name: '1 of 3 places today, progress details', done: false });
+  assert(await ringAt(p, 1 / 3), 'a third of the way round'); assert.equal(await detail(), 'Cafe');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .ring-arc')).opacity), '1', 'and the arc shows');
+  await fixAt(300); await sleep(400);
+  assert.equal((await chipState(p)).text, '2 of 3 places today'); assert(await ringAt(p, 2 / 3), 'two thirds');
+  await fixAt(600); await sleep(400);
+  assert.deepEqual(await chipState(p), { text: 'Today’s goal done', name: 'Today’s goal done, progress details', done: true }, 'the third find completes the goal');
+  assert(await ringAt(p, 1), 'the ring is full'); assert.equal(await detail(), 'Today’s goal done', 'and the find message says so');
+  await fixAt(900); await sleep(400);
+  assert.equal((await chipState(p)).text, 'Today’s goal done', 'more finds stay done'); assert.equal(await detail(), 'Cafe', 'and the goal message is not repeated'); assert(await ringAt(p, 1));
+  await p.close(); t('chip states, ring and goal completion ok');
+}
+{ // the first-open hint: gone after a tap or after the first find, and never again
+  const p = await open('?debug', fakePlaces({ places: [] })); await sleep(500);
+  const hint = () => p.evaluate(() => ({ hidden: document.getElementById('hint').hidden, flag: localStorage.getItem('fogwalk:hinted') }));
+  assert.deepEqual(await hint(), { hidden: false, flag: null }, 'a first visit shows the hint');
+  assert.match(await p.evaluate(() => document.getElementById('hint').textContent), /Walk to clear the fog/);
+  await p.mouse.click(300, 600); await sleep(200);
+  assert.deepEqual(await hint(), { hidden: true, flag: '1' }, 'a tap dismisses it for good');
+  await p.reload({ waitUntil: 'networkidle2' });
+  assert.equal((await hint()).hidden, true, 'and it does not come back after a reload');
+  await p.close();
+  const q = await open('', async (p) => { await captureFix(p); await fakePlaces({ places: [{ name: 'Here', type: 'cafe', ...S0 }] })(p); }); await sleep(500);
+  assert.equal(await q.evaluate(() => document.getElementById('hint').hidden), false, 'a second new device shows it too');
+  await q.evaluate(() => window.__fix({ coords: { latitude: 1.3413, longitude: 103.9638, accuracy: 20 } })); await sleep(300);
+  assert.deepEqual(await q.evaluate(() => [document.getElementById('hint').hidden, localStorage.getItem('fogwalk:hinted')]), [true, '1'], 'the first find dismisses it without any tap');
+  await q.close(); t('first-open hint ok');
+}
+{ // today's count: places restored from an earlier visit don't count again; a new day starts from zero
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const fixture = fakePlaces({ places: [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }] });
+  const a = await open('?debug', fixture, { ctx: device }); await sleep(600);
+  assert.equal((await chipState(a)).text, '1 of 3 places today', 'the place under the start circle counts once');
+  await sleep(2400);                                                                   // the fog (and today's count) are saved
+  await a.reload({ waitUntil: 'networkidle2' }); await sleep(800);
+  assert.equal((await chipState(a)).text, '1 of 3 places today', 'after a reload the same place is restored quietly and is not counted a second time');
+  assert.deepEqual(await toasts(a), [], 'and not announced');
+  await a.close();
+  const tomorrow = await open('?debug', fixture, { ctx: device, days: 1 }); await sleep(800);
+  assert.equal((await chipState(tomorrow)).text, 'Find 3 places today', 'a new day starts from zero (a restored place is not a new find)');
+  assert.equal((await stats(tomorrow)).places, '1 of 1 places found', 'while the all-time count is kept');
+  await tomorrow.close(); await device.close(); t('restored places not counted, new day resets ok');
+}
+{ // a late places file with one old find and one new one in the same batch: only the new one counts toward today
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const places = [{ name: 'Old Find', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }, { name: 'New Find', type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng }];
+  const first = await open('?debug=10', fakePlaces({ places: [places[0]] }), { ctx: device }); await sleep(600);
+  assert.equal((await chipState(first)).text, '1 of 3 places today', 'the first visit finds the old one');
+  await sleep(2400); await first.close();                                                     // saved: the fog and today's count
+  const second = await open('?debug=10', fakePlaces({ places }, 200, 9000), { ctx: device }); await sleep(600);
+  await second.mouse.click(195, 330);                                                         // walk north, before the places file arrives
+  assert(await waitFor(async () => (await toasts(second)).length > 0, 20000), 'the new find is announced once the file arrives');
+  assert.deepEqual(await toasts(second), ['Found New Find'], 'only the new place is announced');
+  assert.equal((await chipState(second)).text, '2 of 3 places today', 'and only the new place is added to today (the old one is not counted again)');
+  await second.close(); await device.close(); t('old and new in one batch: only the new counts');
+}
+{ // the card: a row per kind of place with its own icon and bar, the area bar, and numbers beside every bar
+  const at = (n, e) => ({ lat: S0.lat + dN(n), lng: S0.lng + dE(e) });
+  const places = [
+    { name: 'Noodles', type: 'fast_food', ...at(26, 0) }, { name: 'Soup', type: 'restaurant', ...at(-26, 0) }, { name: 'Corner Shop', type: 'convenience', ...at(0, 26) },
+    { name: 'Tiny Park', type: 'park', ...at(0, -26) }, { name: 'Police Post', type: 'police', ...at(18, 18) }, { name: 'Far Cafe', type: 'cafe', ...at(0, 900) },
+    ...Array.from({ length: 98 }, (_, i) => ({ name: `Stall ${i}`, type: 'food_court', ...at(i / 8, i / 8) })),     // ninety-eight more to find, so the food count is three digits wide
+  ];
+  const scale = (t) => parseFloat(t.match(/scaleX\(([\d.]+)\)/)?.[1] ?? 'NaN');
+  const readRows = (p) => p.evaluate(() => [...document.querySelectorAll('#groups li')].map((li) => ({ group: li.dataset.group, name: li.querySelector('.g-name').textContent, count: li.querySelector('.g-count').textContent, bar: li.querySelector('.bar > span').style.transform, icon: !!li.querySelector('.place-disc svg path') })));
+  const p = await open('?debug', fakePlaces({ places })); await sleep(800);
+  await p.click('#chip'); await sleep(900);
+  const rows = await readRows(p);
+  assert.deepEqual(rows.map((r) => [r.group, r.name, r.count]), [['food', 'Food & drink', '100 of 101'], ['shop', 'Shops', '1 of 1'], ['outdoors', 'Outdoors', '1 of 1'], ['other', 'Other', '1 of 1']], 'one row per kind: found of total');
+  assert(rows.every((r) => r.icon), 'each row has its pin icon');
+  assert(Math.abs(scale(rows[0].bar) - 100 / 101) < 0.01 && rows.slice(1).every((r) => scale(r.bar) === 1), `bars show the share found (${rows.map((r) => r.bar)})`);
+  const widths = await p.evaluate(() => [...document.querySelectorAll('#groups .bar')].map((b) => Math.round(b.getBoundingClientRect().width * 10) / 10));
+  assert(widths.every((w) => w === widths[0]) && widths[0] > 100, `every bar has the same length, whatever its count says (${widths})`);
+  assert.equal((await stats(p)).places, '103 of 104 places found');
+  const roomy = await p.evaluate(() => ({ heading: getComputedStyle(document.getElementById('statsPlaces')).marginBottom, area: getComputedStyle(document.getElementById('statsArea')).marginBottom, overflow: [...document.querySelectorAll('.g-count')].some((c) => c.scrollWidth > c.clientWidth + 1) }));
+  assert.deepEqual(roomy, { heading: '12px', area: '8px', overflow: false }, 'the card keeps its spacing (a more specific rule once removed it) and a three-digit count fits');
+  assert.match((await stats(p)).area, /^\d\.\d\d% of the neighbourhood$/);
+  assert(scale(await p.evaluate(() => document.getElementById('areaBar').style.transform)) >= 0.05, 'the area bar is never invisible once something is explored');
+  await shot(p, 'card');
+  await p.close();
+  const none = await open('?debug', fakePlaces({ places: [{ name: 'Far Cafe', type: 'cafe', ...at(0, 900) }, { name: 'Far Park', type: 'park', ...at(900, 0) }] })); await sleep(800);
+  await none.click('#chip'); await sleep(900);
+  const empty = await readRows(none);
+  assert.deepEqual(empty.map((r) => r.count), ['0 of 1', '0 of 0', '0 of 1', '0 of 0'], 'nothing found: zeros');
+  assert(empty.every((r) => scale(r.bar) === 0), 'and empty bars, not stubs');
+  await none.close(); t('card rows, bars and area ok');
+}
+{ // "Last": tap it and the map goes to that place and opens its name
+  const places = [{ name: 'Right Here', type: 'fast_food', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', fakePlaces({ places })); await sleep(800);
+  await p.evaluate((s) => fogMap.map.setView([s.lat + 0.01, s.lng + 0.01], 17, { animate: false }), S0); await sleep(500);   // pan far away
+  await p.click('#chip'); await sleep(300);
+  assert.deepEqual(await p.evaluate(() => [document.getElementById('statsLast').textContent, document.getElementById('lastType').textContent, document.getElementById('lastFind').hidden]), ['Last: Right Here', 'Fast food', false]);
+  const target = await p.evaluate(() => document.getElementById('lastFind').getBoundingClientRect().height);
+  assert(target >= 48, `the row is a big enough target (${target} px)`);
+  await p.click('#lastFind'); await sleep(900);
+  assert.equal(await p.evaluate(() => document.getElementById('stats').hidden), true, 'the card closes so the map is visible');
+  const away = await p.evaluate((s) => fogMap.map.distance(fogMap.map.getCenter(), { lat: s.lat + 10 / 111195, lng: s.lng }), S0);
+  assert(away < 80, `the map moved to the place (${away.toFixed(0)} m away)`);
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content strong')?.textContent), 'Right Here', 'and its name is open');
+  await p.close();
+  const before = await open('?debug', fakePlaces({ places: [] })); await sleep(500);
+  assert.equal(await before.evaluate(() => document.getElementById('lastFind').hidden), true, 'with nothing found yet there is no "Last" row');
+  await before.close(); t('last find opens its place ok');
+}
+{ // it looks pressable and says so: a visible edge, a tint on press without moving, a chevron that turns, targets 48 px or more
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', fakePlaces({ places })); await sleep(800);
+  const edge = await p.evaluate(() => { const cs = getComputedStyle(document.getElementById('chip')); return { width: cs.borderTopWidth, color: cs.borderTopColor, radius: cs.borderTopLeftRadius }; });
+  assert(parseFloat(edge.width) >= 1 && edge.color === 'rgb(147, 163, 186)' && edge.radius === '24px', `the chip has a visible edge in the --dusk colour, which is 3:1 against the fog (${JSON.stringify(edge)})`);   // Chrome may snap 1.5px to 1px
+  const box = await p.evaluate(() => { const r = document.getElementById('chip').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; });
+  await p.mouse.move(box.x, box.y); await p.mouse.down(); await sleep(250);
+  const pressed = await p.evaluate(() => { const cs = getComputedStyle(document.getElementById('chip')), r = document.getElementById('chip').getBoundingClientRect(); return { tint: cs.backgroundImage, transform: cs.transform, w: r.width, h: r.height }; });
+  assert.match(pressed.tint, /rgba\(238, 243, 248, 0\.12\)/, 'pressing tints the chip');
+  assert.equal(pressed.transform, 'none', 'and does not scale or move it');
+  assert(Math.abs(pressed.w - box.w) < 0.5 && Math.abs(pressed.h - box.h) < 0.5, 'so nothing around it shifts');
+  await p.mouse.up(); await sleep(400);
+  await p.keyboard.press('Escape'); await p.focus('#chip');                                      // close it again, then test a keyboard press (after a key, focus counts as keyboard focus): the ring must survive the tint
+  assert.equal(await p.evaluate(() => document.activeElement.id), 'chip');
+  await p.keyboard.down('Space'); await sleep(200);
+  const keyed = await p.evaluate(() => { const cs = getComputedStyle(document.getElementById('chip')); return { band: cs.boxShadow, tint: cs.backgroundImage }; });
+  assert(/rgb\(238, 243, 248\)/.test(keyed.band) && /rgba\(238, 243, 248, 0\.12\)/.test(keyed.tint), `while a key is held the chip is tinted and still has its focus band (${JSON.stringify(keyed)})`);
+  await p.keyboard.up('Space'); await sleep(400);
+  assert.notEqual(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .chev')).transform), 'none', 'the chevron has turned over: the card is open');
+  assert.equal(await p.evaluate(() => [document.getElementById('chip').getAttribute('aria-expanded'), document.getElementById('stats').hidden].join()), 'true,false');
+  const sizes = await p.evaluate(() => ['chip', 'lastFind', 'soundSwitch'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)));
+  assert(sizes.every((h) => h >= 48), `every control is at least 48 px tall (${sizes})`);
+  await p.keyboard.press('Escape'); await sleep(300);
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .chev')).transform), 'none', 'closed again: the chevron points down');
+  await p.close(); t('pressable look, press tint, chevron, targets ok');
+}
+{ // reduced motion: the ring does not sweep and the card does not slide
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const motion = async (reduce) => {
+    const p = await open('?debug', async (p) => { if (reduce) await p.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]); await fakePlaces({ places })(p); }); await sleep(600);
+    await p.click('#chip'); await sleep(50);
+    const r = await p.evaluate(() => ({ ring: getComputedStyle(document.querySelector('#chip .ring-arc')).transitionDuration, bar: getComputedStyle(document.querySelector('#groups .bar > span')).transitionDuration, card: getComputedStyle(document.getElementById('stats')).animationName }));
+    await p.close(); return r;
+  };
+  assert.deepEqual(await motion(true), { ring: '0s', bar: '0s', card: 'none' }, 'reduced motion: no sweep, no growing bars, no sliding card');
+  const normal = await motion(false);
+  assert(normal.ring !== '0s' && normal.bar !== '0s' && normal.card === 'card-in', `normally they animate (${JSON.stringify(normal)})`);
+  t('reduced motion ok');
+}
+{ // a short screen (a phone on its side): the card scrolls, and its last controls can still be reached
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', fakePlaces({ places })); await sleep(600);
+  await p.setViewport({ width: 640, height: 360, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+  await p.click('#chip'); await sleep(400);
+  const card = await p.evaluate(() => { const c = document.getElementById('stats'), r = c.getBoundingClientRect(); return { bottom: r.bottom, scrolls: c.scrollHeight > c.clientHeight, overflowY: getComputedStyle(c).overflowY }; });
+  assert(card.bottom <= 360, `the card ends inside a 360 px tall screen (${Math.round(card.bottom)})`);
+  assert(card.scrolls && card.overflowY === 'auto', 'and scrolls, because its content is taller');
+  await p.evaluate(() => { document.getElementById('status').textContent = 'No GPS signal. Showing where you last were.'; }); await sleep(100);
+  const msg = await p.evaluate(() => { const r = document.getElementById('status').getBoundingClientRect(), c = document.getElementById('stats').getBoundingClientRect(); return { bottom: r.bottom, below: r.top >= c.bottom - 1 }; });
+  assert(msg.bottom <= 360 && msg.below, `a GPS message under the open card is still on the screen (${Math.round(msg.bottom)} of 360)`);
+  const reach = await p.evaluate(() => { const sw = document.getElementById('soundSwitch'); sw.scrollIntoView(); const a = sw.getBoundingClientRect(), b = document.getElementById('stats').getBoundingClientRect(); return a.top >= b.top - 1 && a.bottom <= b.bottom + 1; });
+  assert(reach, 'the sound switch can be scrolled into view');
+  await p.close(); t('short screen ok');
+}
+{ // "Last" while walking: the map stays on the place (it does not snap back to you), and keyboard focus goes to the chip
+  const places = [{ name: 'Far Back', type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng }];
+  const p = await open('?debug=10', fakePlaces({ places })); await sleep(600);
+  await p.mouse.click(195, 330);                                                              // walk north and find it
+  assert(await waitFor(async () => (await toasts(p)).includes('Found Far Back'), 12000), 'found');
+  const walkTo = (n) => p.evaluate((lat, lng) => fogMap.map.fire('click', { latlng: { lat, lng } }), S0.lat + dN(n), S0.lng);
+  await walkTo(330);                                                                          // keep walking north, well away from it
+  assert(await waitFor(async () => (await p.evaluate((a, b) => fogMap.map.distance(fogMap.where(), { lat: a, lng: b }), S0.lat + dN(62), S0.lng)) > 200, 20000), 'the dot is more than 200 m past the place');
+  await p.click('#chip'); await sleep(300); await p.click('#lastFind'); await sleep(1200);
+  await walkTo(345); await sleep(2500);                                                       // the dot moves again: a following map would jump back to it now
+  const gap = await p.evaluate((a, b) => fogMap.map.distance(fogMap.map.getCenter(), { lat: a, lng: b }), S0.lat + dN(62), S0.lng);
+  assert(gap < 100, `the map stays on the place (${gap.toFixed(0)} m from it) while the dot keeps moving`);
+  assert.equal(await p.evaluate(() => document.getElementById('recentre').style.display), 'block', 'and the recentre button is there to go back');
+  await p.close();
+  const kb = await open('?debug', fakePlaces({ places: [{ name: 'Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }] })); await sleep(600);
+  await kb.click('#chip'); await kb.focus('#lastFind'); await kb.keyboard.press('Enter'); await sleep(900);
+  assert.equal(await kb.evaluate(() => document.activeElement.id), 'chip', 'activating "Last" from the keyboard leaves focus on the chip, not the top of the page');
+  await kb.close(); t('last find keeps the map there, keeps focus ok');
+}
+{ // the app left open past midnight starts the new day
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', async (p) => {
+    await p.evaluateOnNewDocument(() => { const Real = Date; window.__days = 0; window.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + window.__days * 86400000); } static now() { return Real.now() + window.__days * 86400000; } }; });
+    await fakePlaces({ places })(p);
+  }); await sleep(800);
+  assert.equal((await chipState(p)).text, '1 of 3 places today');
+  await p.evaluate(() => { window.__days = 1; document.dispatchEvent(new Event('visibilitychange')); }); await sleep(300);        // the phone is picked up the next morning
+  assert.equal((await chipState(p)).text, 'Find 3 places today', 'coming back to the app after midnight starts a new day without any new find');
+  await p.close(); t('midnight rollover ok');
+}
+{ // two tabs on one device each count a find: neither wipes the other's
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const places = [{ name: 'Spot A', type: 'cafe', lat: S0.lat, lng: S0.lng }, { name: 'Spot B', type: 'cafe', lat: S0.lat + dN(600), lng: S0.lng }];
+  const setup = async (p) => { await captureFix(p); await fakePlaces({ places })(p); };
+  const b = await open('', setup, { ctx: device }), a = await open('', setup, { ctx: device }); await sleep(500);          // b opened first, so it holds an older picture of today
+  const at = (page, n) => page.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  await at(a, 0); await sleep(500);
+  assert.equal((await chipState(a)).text, '1 of 3 places today', 'tab A found one');
+  await at(b, 600); await sleep(500);
+  assert.equal((await chipState(b)).text, '2 of 3 places today', 'tab B adds its find to A\'s instead of replacing it');
+  await a.close(); await b.close(); await device.close(); t('two tabs both count ok');
+}
+{ // "Last" tapped while the map is already panning, or when the map is already on the place
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', fakePlaces({ places })); await sleep(800);
+  const far = (lat) => p.evaluate((s, la) => fogMap.map.setView([la, s.lng], 17, { animate: false }), S0, lat);
+  await far(S0.lat + 0.002); await p.click('#chip'); await sleep(300);                           // ~220 m away: a pan this short really animates (a far one just jumps)
+  await p.evaluate((s) => fogMap.map.panTo([s.lat + 0.0035, s.lng], { animate: true }), S0);       // a pan is under way (as when a GPS fix follows you)
+  await sleep(40);
+  assert.equal(await p.evaluate(() => !!document.querySelector('.leaflet-map-pane.leaflet-pan-anim')), true, 'precondition: the map is still panning when Last is tapped');
+  await p.click('#lastFind'); await sleep(1500);
+  const gap = await p.evaluate((s) => fogMap.map.distance(fogMap.map.getCenter(), { lat: s.lat + 10 / 111195, lng: s.lng }), S0);
+  assert(gap < 80, `tapped mid-pan, the map still ends on the place (${gap.toFixed(0)} m away)`);
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content strong')?.textContent), 'Right Here', 'and its name is open');
+  // already centred: nothing moves, so following is not switched off and no recentre button appears
+  await p.evaluate((s) => { document.querySelector('.leaflet-popup-close-button')?.click(); fogMap.map.closePopup(); fogMap.map.setView([s.lat + 10 / 111195, s.lng], 17, { animate: false }); document.getElementById('recentre').style.display = 'none'; }, S0);
+  await p.click('#chip'); await sleep(300); await p.click('#lastFind'); await sleep(600);
+  assert.equal(await p.evaluate(() => document.getElementById('recentre').style.display), 'none', 'when the map is already on the place, tapping Last does not turn off following');
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content strong')?.textContent), 'Right Here', 'but still shows its name');
+  await p.close(); t('Last mid-pan and when already there ok');
+}
+{ // two tabs: one place found in both counts once; a tab left open since yesterday cannot wipe today's count
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const places = [{ name: 'Spot A', type: 'cafe', id: 'node/1', lat: S0.lat, lng: S0.lng }, { name: 'Spot B', type: 'cafe', id: 'node/2', lat: S0.lat + dN(600), lng: S0.lng }, { name: 'Spot C', type: 'cafe', id: 'node/3', lat: S0.lat + dN(1200), lng: S0.lng }];
+  const clock = async (p) => { await captureFix(p); await p.evaluateOnNewDocument(() => { const Real = Date; window.__days = 0; window.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + window.__days * 86400000); } static now() { return Real.now() + window.__days * 86400000; } }; }); await fakePlaces({ places })(p); };
+  const at = (page, n) => page.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const b = await open('', clock, { ctx: device }), a = await open('', clock, { ctx: device }); await sleep(500);
+  await at(a, 0); await sleep(500); await at(b, 0); await sleep(500);                          // the same place, found in both tabs
+  assert.equal((await chipState(a)).text, '1 of 3 places today'); assert.equal((await chipState(b)).text, '1 of 3 places today', 'one place found in two tabs counts once');
+  await a.evaluate(() => { window.__days = 1; }); await b.evaluate(() => { window.__days = 0; });  // tomorrow in tab A only: A starts a new day and finds two places
+  await a.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await sleep(300);
+  await at(a, 600); await sleep(500); await at(a, 1200); await sleep(500);                       // two places it has not found before
+  assert.equal((await chipState(a)).text, '2 of 3 places today', 'tab A has its new day under way');
+  await b.evaluate(() => { window.__days = 1; }); await b.bringToFront(); await sleep(400);          // B is brought back to the front on the new day, still holding yesterday in memory
+  assert.equal((await chipState(b)).text, '2 of 3 places today', 'a tab left open since yesterday picks up today\'s count; it does not reset it to zero');
+  await a.close(); await b.close(); await device.close(); t('same place in two tabs, stale tab after midnight ok');
+}
+{ // an app left open and never brought back to the foreground still rolls over, within a minute
+  const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
+  const p = await open('?debug', async (p) => {
+    await p.evaluateOnNewDocument(() => { const Real = Date; window.__days = 0; window.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + window.__days * 86400000); } static now() { return Real.now() + window.__days * 86400000; } }; });
+    await fakePlaces({ places })(p);
+  }); await sleep(800);
+  assert.equal((await chipState(p)).text, '1 of 3 places today');
+  await p.evaluate(() => { window.__days = 1; });                                              // midnight passes while the app sits there
+  assert(await waitFor(async () => (await chipState(p)).text === 'Find 3 places today', 70000), 'within a minute the chip starts the new day by itself');
+  await p.close(); t('midnight rollover by timer ok');
+}
+{ // a narrow phone: the longest chip texts stay on one line and the card stays on screen
+  const p = await open('?debug', fakePlaces({ places: [] }));
+  await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+  for (const label of ['Find 3 places today', '2 of 3 places today', 'Today’s goal done']) {
+    await p.evaluate((l) => { document.getElementById('chipText').textContent = l; }, label);
+    const r = await p.evaluate(() => document.getElementById('chip').getBoundingClientRect().toJSON());
+    assert(r.height <= 56 && r.right <= 320 - 12, `"${label}" fits on one line (${Math.round(r.width)} x ${Math.round(r.height)} px)`);
+  }
+  await p.evaluate(() => { document.getElementById('chipText').textContent = 'Find 3 places today, and then a good few more besides'; });
+  const long = await p.evaluate(() => ({ right: document.getElementById('chip').getBoundingClientRect().right, cut: document.getElementById('chipText').scrollWidth > document.getElementById('chipText').clientWidth }));
+  assert(long.right <= 320 - 12 && long.cut, `a very long label shortens instead of pushing the chip off screen (right edge ${Math.round(long.right)})`);
+  await p.evaluate(() => { document.getElementById('chipText').textContent = 'Find 3 places today'; });
+  await p.click('#chip'); await sleep(400);
+  const card = await p.evaluate(() => document.getElementById('stats').getBoundingClientRect().toJSON());
+  assert(card.left >= 0 && card.right <= 320 && card.bottom <= 640, `the open card fits a small screen (${Math.round(card.right)} x ${Math.round(card.bottom)})`);
+  await shot(p, 'card-narrow');
+  await p.close(); t('narrow phone ok');
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));

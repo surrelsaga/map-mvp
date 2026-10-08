@@ -9,7 +9,10 @@ import * as storage from './storage.ts';
 import * as discovery from './discovery.ts';
 import * as hud from './hud.ts';
 import * as sound from './sound.ts';
-import { MAX_ACCURACY, ROUGH_HINT_DELAY } from './config.ts';
+import * as placesLayer from './placesLayer.ts';
+import * as today from './today.ts';
+import { getFlag, setFlag } from './flags.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY } from './config.ts';
 import type { Fix } from './types.ts';
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
@@ -17,8 +20,12 @@ const storeKey = storage.storeKey(debug !== null);
 fogLayer.load(storage.readFog(storeKey));            // bring back earlier progress before the first fix
 const saver = storage.createSaver(storeKey, fogLayer.snapshot);
 
-hud.init(sound.isOn(), sound.setOn);
-discovery.start(import.meta.env.BASE_URL + 'places.json');   // starts loading right away; places already in restored fog appear quietly
+hud.init({
+  soundOn: sound.isOn(), onSound: sound.setOn,
+  onFocus: (place) => { if (placesLayer.focusPlace(place)) me.stopFollowing(); },   // "Last: ..." in the stats card: show that place on the map, and stay there (not snap back to you on the next fix)
+  hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
+});
+discovery.start(import.meta.env.BASE_URL + 'places.json', today.todayStoreKey(debug !== null));   // starts loading right away; places already in restored fog appear quietly
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 
