@@ -1,4 +1,4 @@
-# Fog Walk map
+# Walk-maxxing
 
 A map of your neighbourhood covered in fog. The fog clears wherever you walk, and progress stays on your device.
 
