@@ -20,6 +20,11 @@ export function reveal({ lat, lng }: LatLng) {
 }
 export const isRevealed = (lat: number, lng: number) => fog.isRevealed(cells, lat, lng);
 export const snapshot = () => [...cells];             // for saving
+export function countIn(area: fog.Cells) {            // how many cleared cells fall inside `area` (for % explored)
+  let n = 0;
+  for (const k of cells) if (area.has(k)) n++;
+  return n;
+}
 export function load(keys: unknown) {                // untrusted: saved data can be missing, old or corrupted
   if (!Array.isArray(keys)) return;
   for (const k of keys) if (Number.isSafeInteger(k)) cells.add(k);

@@ -5,7 +5,7 @@ import type { LatLng } from './types.ts';
 
 const EARTH_R = 6371000;                              // metres
 const RAD = Math.PI / 180;
-const M_PER_DEG = EARTH_R * RAD;                      // same Earth model as dist(), so the two can't disagree
+export const M_PER_DEG = EARTH_R * RAD;                      // same Earth model as dist(), so the two can't disagree
 const K = 2 * Math.ceil(180 / CELL) + 2;              // more than 2 * max |j| for any CELL, so i * K + j is unique for every cell on Earth
 
 export type Cells = Set<number>;

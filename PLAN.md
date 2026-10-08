@@ -24,13 +24,16 @@ src/
   fog.ts            PURE logic: grid cells, distance, reveal, isRevealed (no DOM, no Leaflet, Node-testable)   phase 2
   fogLayer.ts       canvas overlay that draws the fog from fog.ts state   phase 2
   storage.ts        save/load revealed cells (localStorage), debounced saver   ✅ phase 3
-  places.ts         load places.json, hide/show by fog, "Found" toasts    phase 4
-  hud.ts            % explored + places-found display                     phase 4/5
+  places.ts         PURE: parse places.json, find newly cleared places, "Found" text   ✅ phase 4
+  discovery.ts      places + found state + % explored; toast, vibrate, HUD refresh   ✅ phase 4
+  placesLayer.ts    pins + popups for found places (Leaflet)             ✅ phase 4
+  coverage.ts       PURE: the 2 km circle as cells, % explored             ✅ phase 4
+  hud.ts            % explored + places-found display (DOM)               ✅ phase 4
   api.ts            window.fogMap quest interface                         phase 6
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
-public/places.json  slim list `{name, type, lat, lng}` (committed)         phase 4
+public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
 tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
-tests/fog.test.ts, storage.test.ts  plain `node:assert` checks for src/fog.ts and the pure half of src/storage.ts (Node 24 runs the TypeScript directly)
+tests/fog.test.ts, storage.test.ts, places.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage) and for the shipped places.json (Node 24 runs the TypeScript directly)
 tests/browser.mjs   dev-only headless-Chrome regression suite (`npm run test:browser`, puppeteer-core); not part of `npm test` or CI
 ```
 
@@ -44,7 +47,7 @@ Rules:
 ## How each phase runs
 The MVP is a chain of separate pieces. Each piece goes through this loop before the next one starts:
 1. **Build**: only that phase's piece.
-2. **Test**: `npm test`, `npm run typecheck`, then `npm run test:browser` against `npm run dev` (it covers every earlier phase too, so it is the regression check). Take a screenshot for visual changes. A phase that changes the build is also checked against `npm run build` + `npm run preview`.
+2. **Test**: `npm test`, `npm run typecheck`, then `npm run test:browser` against `npm run dev` (it starts with a warm-up page load: right after a source edit the Vite dev server reloads the first page that connects, and a reload keeps saved progress, which would change what counts as a new find mid-test) (it covers every earlier phase too, so it is the regression check). Take a screenshot for visual changes. A phase that changes the build is also checked against `npm run build` + `npm run preview`.
 3. **Review**: run the `code-review` skill (correctness) and the `ponytail-review` skill (over-engineering) on the changes, then fix what they find and test again.
 4. **Your check**: you try it on the laptop or phone and say go.
 5. **Commit + push to Pages**, then start the next phase.
@@ -81,14 +84,17 @@ Installed skills used: `code-review`, `frontend-design` (Phase 5), `ponytail`.
 - Not done: no on-screen notice when saving fails (console warning only; the Phase 5 HUD is the place for one); `navigator.storage.persist()` isn't requested, so Safari may evict data after ~7 idle days if the page isn't installed to the home screen.
 - Check: walk, reload, the fog stays cleared (also covered by `npm run test:browser`).
 
-**4. Discover places**
-- Output goes to `public/places.json` (Vite only ships what is imported or in `public/`), fetched at runtime via `import.meta.env.BASE_URL + 'places.json'`, so it works under `/map-mvp/`. Moved there from the repo-root `data/` path in the module map above.
-- `tools/fetch-places.mjs`: one Overpass query for named `amenity|shop|leisure|tourism|historic` places within 2 km of SUTD, trimmed to `{name, type, lat, lng}`.
-- `revealPath`/`reveal` only return a count today. Phase 4 changes them to return the newly cleared keys, which is what "Found: <name>" needs.
-- Place markers sit in Leaflet's marker pane, which is *above* the fog pane, so the fog does not hide them: hide them in code (`isRevealed`) and show them when their cell clears.
-- Places stay hidden while their cell is under fog. When a cell first clears, a small toast shows "Found: <name>" with a short vibration. Tap a place pin to see its name.
-- The HUD shows % of the 2 km area explored and the number of places found.
-- Check: a debug walk past a known place (e.g. a hawker centre near SUTD) makes it pop up.
+**4. Discover places** ✅ built, awaiting your check
+- `tools/fetch-places.mjs` (run once on the laptop: `node tools/fetch-places.mjs`) queries the OpenStreetMap Overpass API for named `amenity|shop|leisure|tourism|historic` places within 2 km of SUTD and writes `public/places.json` (283 places, each with its OpenStreetMap id like `node/123`, which quests will use to refer to a place). It drops street furniture (parking, benches, toilets...) and path segments (park connectors), merges same-name places within ~100 m, and keeps only places inside the circle. It takes SUTD and the radius from `src/config.ts`, identifies itself with a `User-Agent` (Overpass rejects anonymous clients), pauses between servers, and refuses to overwrite the file when Overpass answers with an error, a `remark` or too few results. The app never calls Overpass: the file ships with the app, so nobody's location is sent anywhere.
+- `src/places.ts` (pure, Node-tested): `parsePlaces` (keeps only well-formed entries; names have control and direction-override characters stripped, are trimmed and capped at 80 characters), `discover` (places whose spot is now cleared, each found once), `foundMessage` ("Found: A", "Found: A and B", "Found: A, B and 3 more", and repeated chain names as "7-Eleven ×2").
+- `src/discovery.ts`: owns the place list, the found set and the stats. `start(url)` loads the file (a network or server error is retried twice, after 1.5 s and 4 s; a missing file, 4xx, is not) and builds the 2 km circle just after first paint; `onCleared()` runs when walking clears new cells. A find gets a toast, a short vibration and a HUD refresh. Vibration only works on Android after the user has tapped the page once; iPhones have no vibration API at all, so on iPhone a find is the toast only (Phase 5 should add a second cue, e.g. a sound or a persistent "new" marker). Anything cleared since the page opened is announced, even if the file arrives late; only places inside fog restored from an earlier session appear quietly. `reveal()` was not changed to return the new cells (the earlier idea): checking ~300 places per cleared fix is trivial and needs no new API.
+- `src/placesLayer.ts`: a pin per found place in its own `places` pane (above the fog, below the player dot); tapping shows the name in a popup. Names are untrusted OSM text, so they only reach the page via `textContent`, never HTML. Pins are plain DOM `divIcon`s (no image files).
+- `src/coverage.ts` (pure, Node-tested): the 2 km circle as a set of fog cells (~100k, built once at start) and "% explored" = cleared cells inside it, shown as `0.04%` while tiny and `3.2%` once visible.
+- `src/hud.ts`: "0.08% explored, 1 of 282 places found", top-left. The toast ("Found: ...") is in `ui.ts`, bottom-centre, 4 s, and its text is emptied after the fade so screen readers aren't left a stale message. HUD and the GPS status message sit in one column (`#top`), so a wrapping HUD can't cover the message.
+- Placeholder look: orange pins, white HUD pill, dark toast. Phase 5 designs it properly.
+- Known limits: a big place (a park, a campus) is one point at its centre, so it counts as found only when that spot is cleared, even if the centre is a pond or fence; names are merged by a rounded ~100 m grid (two same-name shops close together become one); found places are tracked by list index within a session (stable ids are in the data for anything that must persist, e.g. quests).
+- Names: control characters become a space; direction marks, zero-width, soft-hyphen and tag characters are removed (written as `\u` escapes in `places.ts`, never as raw invisible characters).
+- Check: a debug walk to the SUTD Canteen (91 m from the start) shows "Found: SUTD Canteen" and its pin. Covered by `npm run test:browser` against the real data.
 
 **5. UI design pass**
 - Use the `frontend-design` skill. First a short token plan (4–6 colours, typeface, layout as an ASCII wireframe) for your review, then the build.

@@ -5,13 +5,30 @@ html, body { margin: 0; overflow: hidden; }
   width: 48px; height: 48px; border-radius: 50%; border: 0; background: #fff; font-size: 24px;
   box-shadow: 0 1px 6px rgba(0,0,0,.35); display: none;
 }
-#status {
+#top {
   position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right));
   top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
-  padding: 8px 12px; border-radius: 8px; background: #fff; font: 14px system-ui, sans-serif;
-  box-shadow: 0 1px 6px rgba(0,0,0,.35); pointer-events: none;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none;   /* the HUD and the status banner stack, whatever their height */
 }
-#status:empty { opacity: 0; }                       /* stays in the page so screen readers announce text changes */
+#hud {
+  max-width: 100%; padding: 4px 10px; border-radius: 8px; background: #fff; font: 13px system-ui, sans-serif;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35);
+}
+#hud:empty { display: none; }
+#toast {
+  position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 1000; margin: 0 auto; width: fit-content; max-width: 100%;
+  padding: 10px 14px; border-radius: 8px; background: #1e2634; color: #fff; font: 15px system-ui, sans-serif; text-align: center; overflow-wrap: anywhere;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35); pointer-events: none; opacity: 0; transition: opacity .25s;
+}
+#toast.show { opacity: 1; }
+.place-pin { position: relative; }
+.place-pin::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: #e8590c; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+#status {
+  align-self: stretch; padding: 8px 12px; border-radius: 8px; background: #fff; font: 14px system-ui, sans-serif;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35);
+}
+#status:empty { height: 0; padding: 0; box-shadow: none; overflow: hidden; }   /* collapsed but still in the page, so screen readers announce text changes */
 .leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
 #debug {
   position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom)); z-index: 1000;

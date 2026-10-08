@@ -6,6 +6,7 @@ import { startGps } from './gps.ts';
 import { startDebugWalk } from './debugWalk.ts';
 import * as fogLayer from './fogLayer.ts';
 import * as storage from './storage.ts';
+import * as discovery from './discovery.ts';
 import { MAX_ACCURACY, ROUGH_HINT_DELAY } from './config.ts';
 import type { Fix } from './types.ts';
 
@@ -13,6 +14,8 @@ const debug = new URLSearchParams(location.search).get('debug');   // ?debug or 
 const storeKey = storage.storeKey(debug !== null);
 fogLayer.load(storage.readFog(storeKey));            // bring back earlier progress before the first fix
 const saver = storage.createSaver(storeKey, fogLayer.snapshot);
+
+discovery.start(import.meta.env.BASE_URL + 'places.json');   // starts loading right away; places already in restored fog appear quietly
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 
@@ -23,11 +26,13 @@ function onFix(fix: Fix) {
   if (fix.accuracy <= MAX_ACCURACY) {                // but only a trustworthy fix clears fog
     lastPrecise = now;
     say('');
-    if (fogLayer.reveal(fix)) saver.schedule();       // new cells cleared: save soon
+    if (fogLayer.reveal(fix)) {                       // new cells cleared:
+      saver.schedule();                               // save soon
+      discovery.onCleared();                          // any place under them is found; the stats update
+    }
   } else if (!lastPrecise || now - lastPrecise > ROUGH_HINT_DELAY) {   // ignore brief dips near the limit, so the hint doesn't flicker
     say(`GPS ±${Math.ceil(fix.accuracy / 10) * 10} m. Fog clears within ${MAX_ACCURACY} m, try outdoors.`);
   }
-  // next: places.check(fix), ...
 }
 
 if (debug === null) {

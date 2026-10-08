@@ -10,6 +10,8 @@ L.tileLayer(TILE_URL, {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 
-// Layer order, bottom to top: tiles (200), fog (450), player dot (500), markers (600).
+// Layer order, bottom to top: tiles (200), fog (450), discovered places (480), player dot (500), popups (700).
+// Quest markers (phase 6) get their own pane, so they look different from discovered places.
 map.createPane('fog').style.zIndex = '450';
+map.createPane('places').style.zIndex = '480';
 map.createPane('player').style.zIndex = '500';

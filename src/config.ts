@@ -20,3 +20,8 @@ export const MAX_JUMP = 200;              // metres: a bigger gap between fixes 
 // Saved progress
 export const SAVE_DELAY_MS = 2000;        // newly cleared cells are written to storage at most this often (also flushed when the page is hidden)
 export const STORE_KEY = 'fogwalk:v1';    // bump the version when the stored format or the grid (fog.key) changes; storage.ts adds CELL, and ':debug' in debug mode
+
+// Places
+export const AREA_RADIUS = 2000;          // metres around SUTD: the neighbourhood that "% explored" is measured against (same as tools/fetch-places.mjs)
+export const TOAST_MS = 4000;             // how long a "Found: ..." message stays up
+export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)

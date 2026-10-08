@@ -17,6 +17,14 @@ const open = async (query = '', setup, { permit = true } = {}) => {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   await page.setViewport({ width: 390, height: 780, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await page.evaluateOnNewDocument(() => {                       // remember every toast shown, so a test can't miss one that already faded
+    const seen = (window.__toasts = []);                         // watches the whole document from the very start: module scripts run before DOMContentLoaded
+    let prev = '';
+    new MutationObserver(() => {
+      const t = document.getElementById('toast')?.textContent ?? '';
+      if (t !== prev) { prev = t; if (t) seen.push(t); }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
   if (setup) await setup(page);
   await page.goto(BASE + query, { waitUntil: 'networkidle2' });
   return page;
@@ -39,6 +47,14 @@ const alphaAt = (p, lat, lng) => p.evaluate(([lat, lng]) => {   // fog opacity a
 const dN = (m) => m / 111195, dE = (m) => m / 111195 / Math.cos(1.3413 * Math.PI / 180);
 const CLEAR = 40, FOGGED = 200;
 const t = (name) => console.log('  ' + name);
+
+// Warm-up: right after a source edit the Vite dev server reloads the first page that connects. Take that hit here, once,
+// so no test is the one that gets reloaded mid-run (a reload keeps saved progress, which changes what counts as a new find).
+{
+  const p = await open('?debug');
+  await sleep(2500);
+  await p.close();
+}
 
 console.log('Phase 1: map, dot, GPS');
 { // real-GPS path
@@ -320,6 +336,154 @@ console.log('Phase 3: saved progress');
   await p.mouse.click(195, 330); await sleep(3500);
   assert((await count(p)) > 60, 'walking still clears fog without storage');
   await p.close(); t('blocked storage ok');
+}
+
+console.log('Phase 4: places');
+// Serve our own places.json so the checks don't depend on the real data.
+const fakePlaces = (body, status = 200, delay = 0) => async (p) => {
+  await p.setRequestInterception(true);
+  p.on('request', async (r) => {
+    if (!r.url().endsWith('places.json')) return r.continue();
+    if (delay) await sleep(delay);
+    r.respond({ status, contentType: 'application/json', body: typeof body === 'string' ? body : JSON.stringify(body) }).catch(() => {});
+  });
+};
+const S0 = { lat: 1.3413, lng: 103.9638 };
+const pins = (p) => p.evaluate(() => [...document.querySelectorAll('.place-pin')].map((e) => e.title));
+const hud = (p) => p.evaluate(() => document.getElementById('hud').textContent);
+const toasts = (p) => p.evaluate(() => window.__toasts ?? []);
+const toastText = (p) => p.evaluate(() => { const t = document.getElementById('toast'); return t.classList.contains('show') ? t.textContent : null; });
+const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) { if (await fn()) return true; await sleep(100); } return false; };
+{ // discover by walking: starts hidden, appears when its spot clears, with a toast
+  const places = [
+    { name: 'Right Here', type: 'cafe', ...S0, lat: S0.lat + dN(10) },        // under the start circle: found quietly at start-up
+    { name: 'Up The Road', type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng },  // ~62 m north: found when the walk gets there
+    { name: 'Far Away', type: 'cafe', lat: S0.lat, lng: S0.lng + dE(900) },    // never reached
+  ];
+  const p = await open('?debug=10', fakePlaces({ places })); await sleep(800);
+  assert.deepEqual(await pins(p), ['Right Here'], 'only the place under the start circle is shown');
+  assert.deepEqual(await toasts(p), ['Found: Right Here'], 'a place under you when the app opens is a find, so it is announced');
+  assert.match(await hud(p), /^0\.\d\d% explored, 1 of 3 places found$/, 'hud: ' + (await hud(p)));
+  const pct0 = parseFloat(await hud(p));
+  await p.mouse.click(195, 330);                                              // walk ~70 m north
+  assert(await waitFor(async () => (await toastText(p)) === 'Found: Up The Road'), 'a toast names the place when it is reached (toast: ' + (await toastText(p)) + ')');
+  assert.deepEqual((await pins(p)).sort(), ['Right Here', 'Up The Road'], 'its pin appears; the far one stays hidden');
+  assert.match(await hud(p), /2 of 3 places found/);
+  assert(parseFloat(await hud(p)) > pct0, 'explored % went up');
+  await sleep(4600);                                                          // TOAST_MS
+  assert.equal(await toastText(p), null, 'the toast fades away');
+  assert.equal(await p.evaluate(() => document.getElementById('toast').textContent), '', 'and its text is cleared, so screen readers are not left a stale message');
+  // tap the pin: its name shows
+  await sleep(500);
+  const box = await p.evaluate(() => { const r = document.querySelector('.place-pin[title="Up The Road"]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await p.mouse.click(box.x, box.y); await sleep(400);
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), 'Up The Road', 'tapping a pin shows its name');
+  await shot(p, 'places');
+  // a reload brings the found places back quietly
+  await sleep(1500);
+  await p.reload({ waitUntil: 'networkidle2' }); await sleep(800);
+  assert.deepEqual((await pins(p)).sort(), ['Right Here', 'Up The Road'], 'found places survive a reload');
+  assert.deepEqual(await toasts(p), [], 'and finds from an earlier session are not announced again');
+  await p.close(); t('hidden until cleared, toast, popup, reload ok');
+}
+{ // the places file arrives late: what was cleared in the meantime is still announced; only earlier sessions' fog is quiet
+  const places = [{ name: 'Up The Road', type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng }];
+  const p = await open('?debug=10', fakePlaces({ places }, 200, 8000));      // the walk (~5 s) is over before the file arrives
+  await sleep(300);
+  assert.match(await hud(p), /0 places found$/, 'while loading: no total yet (' + (await hud(p)) + ')');
+  await p.mouse.click(195, 330);
+  assert.equal(await waitFor(async () => (await pins(p)).length > 0, 14000), true, 'the pin appears once the file arrives');
+  assert.deepEqual(await toasts(p), ['Found: Up The Road'], 'and it is announced, not found "quietly"');
+  assert.match(await hud(p), /1 of 1 places found/);
+  await p.close(); t('late places file still announces new finds');
+}
+{ // several found at once, and untrusted names
+  const evil = '<img src=x onerror="window.__xss=1">';
+  const places = [
+    { name: evil, type: 'cafe', lat: S0.lat + dN(62), lng: S0.lng },
+    { name: 'Second', type: 'cafe', lat: S0.lat + dN(45), lng: S0.lng + dE(30) },     // pins are 28 px wide (~33 m): keep them apart so a tap hits one
+    { name: 'Third', type: 'cafe', lat: S0.lat + dN(45), lng: S0.lng - dE(30) },
+    { name: 7, type: 'cafe', lat: S0.lat, lng: S0.lng },                       // malformed entries are skipped
+    { name: 'No coords', type: 'cafe' },
+  ];
+  const p = await open('?debug=10', fakePlaces({ places })); await sleep(800);
+  assert.match(await hud(p), /0 of 3 places found/, 'malformed entries are not counted: ' + (await hud(p)));
+  await p.mouse.click(195, 330);
+  assert(await waitFor(async () => (await toastText(p)) !== null), 'toast appears');
+  assert.match(await toastText(p), /^Found: .+, .+ and 1 more$/, 'several at once are summarised: ' + (await toastText(p)));
+  await sleep(300);
+  const box = await p.evaluate((n) => { const e = [...document.querySelectorAll('.place-pin')].find((x) => x.title === n); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, evil);
+  await p.mouse.click(box.x, box.y); await sleep(400);
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), evil, 'the name is shown as text');
+  assert.equal(await p.evaluate(() => document.querySelectorAll('img[src="x"], .leaflet-popup-content img').length), 0, 'no <img> was created from the name');
+  assert.equal(await p.evaluate(() => window.__xss), undefined, 'and nothing ran');
+  await p.close(); t('multi-find message, untrusted names stay text ok');
+}
+{ // flaky network: a failing places.json is retried and the places still arrive
+  let asked = 0;
+  const flaky = async (p) => {
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().endsWith('places.json')) return r.continue();
+      asked++;
+      if (asked <= 2) return void r.respond({ status: 503, body: 'busy' }).catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', body: JSON.stringify({ places: [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }] }) }).catch(() => {});
+    });
+  };
+  const p = await open('?debug', flaky);
+  assert.deepEqual(await pins(p), [], 'nothing yet while the server is failing');
+  assert(await waitFor(async () => (await pins(p)).length === 1, 14000), `places arrive after two failed attempts (requests: ${asked})`);
+  assert.equal(asked, 3, 'two retries, then success');
+  await p.close(); t('server errors are retried');
+}
+{ // a missing file (404) is final: no pointless retries
+  let asked = 0;
+  const p = await open('?debug', async (p) => { await p.setRequestInterception(true); p.on('request', (r) => { if (!r.url().endsWith('places.json')) return r.continue(); asked++; r.respond({ status: 404, body: 'no' }).catch(() => {}); }); });
+  await sleep(7000);                                                          // longer than all the retry pauses together
+  assert.equal(asked, 1, '404 is not retried');
+  assert.match(await hud(p), /explored, 0 places found$/);
+  await p.close(); t('404 not retried ok');
+}
+{ // narrow phone: a long HUD wraps instead of covering the GPS message
+  const p = await open('?debug', fakePlaces({ places: [] }));
+  await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await p.evaluate(() => { document.getElementById('hud').textContent = '12.34% explored, 100 of 282 places found, and then some extra words to force a wrap'; document.getElementById('status').textContent = 'GPS ±90 m. Fog clears within 50 m, try outdoors.'; });
+  const r = await p.evaluate(() => ['hud', 'status'].map((id) => document.getElementById(id).getBoundingClientRect().toJSON()));
+  assert.equal(await p.evaluate(() => document.getElementById('hud').getAttribute('role')), 'group', 'the HUD has a role, so its label means something');
+  assert(r[0].height > 30, 'the HUD wrapped to two lines (' + r[0].height + ' px)');
+  assert(r[0].bottom <= r[1].top, `HUD (bottom ${r[0].bottom}) does not overlap the status banner (top ${r[1].top})`);
+  assert(r[0].right <= 320 && r[1].right <= 320 && r[0].left >= 0, 'both stay inside the screen');
+  await p.evaluate(() => { document.getElementById('toast').textContent = 'Found: ' + 'x'.repeat(80); document.getElementById('toast').classList.add('show'); });
+  const tb = await p.evaluate(() => document.getElementById('toast').getBoundingClientRect().toJSON());
+  assert(tb.left >= 0 && tb.right <= 320, `a long unbroken name stays inside the screen (${tb.left}..${tb.right})`);
+  await shot(p, 'layout-narrow');
+  await p.close(); t('narrow layout ok');
+}
+{ // no places file, or a broken one: the app still works
+  for (const [name, setup] of [['404', fakePlaces('nope', 404)], ['not JSON', fakePlaces('{{{')], ['wrong shape', fakePlaces('[1,2,3]')], ['empty list', fakePlaces({ places: [] })]]) {
+    const p = await open('?debug', setup); await sleep(800);
+    assert.match(await hud(p), /explored, 0 places found$/, `${name}: hud still works (${await hud(p)})`);
+    assert.deepEqual(await pins(p), [], `${name}: no pins`);
+    assert((await count(p)) > 20, `${name}: fog still clears`);
+    await p.close();
+  }
+  t('missing / broken places file ok');
+}
+{ // the real data end to end: walk to the nearest place that is not already in the start circle
+  const p = await open('?debug=10'); await sleep(800);
+  const total = Number((await hud(p)).match(/of (\d+) places/)?.[1]);
+  assert(total > 100, `real places loaded (${total})`);
+  const target = await p.evaluate(async (S0) => {
+    const f = await (await fetch('places.json')).json();
+    const d = (q) => Math.hypot((q.lat - S0.lat) * 111195, (q.lng - S0.lng) * 111195 * Math.cos(S0.lat * Math.PI / 180));
+    return f.places.filter((q) => d(q) > 70 && d(q) < 160).sort((a, b) => d(a) - d(b))[0];
+  }, S0);
+  assert(target, 'a real place 70-160 m from SUTD');
+  await p.evaluate((q) => fogMap.map.fire('click', { latlng: { lat: q.lat, lng: q.lng } }), target);
+  assert(await waitFor(async () => ((await toastText(p)) ?? '').includes(target.name), 20000), `walking to "${target.name}" announces it (toast: ${await toastText(p)})`);
+  assert((await pins(p)).includes(target.name), 'and its pin is on the map');
+  await shot(p, 'places-real');
+  await p.close(); t(`real data: walked to "${target.name}" (${target.type}) and found it`);
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));

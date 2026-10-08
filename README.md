@@ -21,7 +21,7 @@ Real GPS needs HTTPS (or localhost). To test it on a phone, use the deployed pag
 | Command | What it does |
 |---|---|
 | `npm run dev` | dev server with hot reload |
-| `npm test` | fog and storage logic tests (plain Node, no framework) |
+| `npm test` | logic tests for fog, storage, places and coverage (plain Node, no framework) |
 | `npm run test:browser` | headless-Chrome regression suite; start `npm run dev` first (needs Chrome; set `CHROME=` if it isn't in the usual macOS place) |
 | `npm run typecheck` | TypeScript check |
 | `npm run build` | type-check, then build to `dist/` |
@@ -31,5 +31,15 @@ Real GPS needs HTTPS (or localhost). To test it on a phone, use the deployed pag
 
 Every push to `main` runs `.github/workflows/deploy.yml` (test, build, publish to GitHub Pages).
 One-time setup, **before the first push of this setup**: repo **Settings → Pages → Source: GitHub Actions**. Until then Pages would publish the raw repo files, and the page would be blank because browsers can't run `.ts`.
+
+## Places
+
+Places to discover come from OpenStreetMap, fetched once into `public/places.json` (so the app itself never contacts OpenStreetMap's data servers; only the map tiles come from there):
+
+```
+node tools/fetch-places.mjs
+```
+
+Place data © OpenStreetMap contributors, ODbL.
 
 See `PLAN.md` for the architecture and build phases.
