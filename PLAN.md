@@ -287,7 +287,7 @@ Render setup for the branch (one time, in the Render dashboard, **New → Static
 
 Commit message: `feat: two simple quests (reach a spot, find new places)`
 
-**7. Regions: a 2 km circle that follows you** (built, waiting for your check; branch `feat/load-2km-region-around-current-location`)
+**7. Regions: a 2 km circle that follows you** ✅ built and deployed on Render, committed (branch `feat/load-2km-region-around-current-location`)
 
 Goal: anyone can open the app wherever they are and get places, quests and "% explored" for the 2 km around them. Today all of that only exists for one fixed circle around SUTD. Only one region is ever loaded at a time, never a whole city.
 
@@ -401,6 +401,57 @@ Not in this phase: AI quests (Phase 8), drawing the region circle on the map, a 
 
 Commit message: `feat: load a 2 km region around the current location`
 
+**8. AI quests on the phone** (planned, not built). Decisions below were made after research; nothing is implemented.
+
+Goal: the quest text for a reach quest is written by an open model (Gemma 3 1B) that runs **on the phone** in the browser, so the "why open" story is: open weights, free to run, works offline once downloaded, and no prompt or position leaves the phone. Completion does not change: a reach quest still finishes when the fog clears its place (`quests.progress`).
+
+Decision and why:
+- **On-device (WebGPU), not on Render.** Render has no GPUs; Ollama on CPU needs a paid instance with 2 GB or more (Standard, ~$25/month or above) and is slow, and it would send place names and a rough position to our server. The only thing on Render is the places service (Phase 7).
+- **Library:** WebLLM first (it ships a prebuilt Gemma 3 1B, listed at ~563 MB download and ~711 MB VRAM, q4f16). Backup: MediaPipe LLM Inference (`.task` file, ~529 MB). Transformers.js is the third choice (no mobile Gemma 3 results found).
+- **Limits found in research (not yet tested on our phones):**
+  - iPhone Safari kills a tab at roughly 1.5 GB with no error to catch. WebLLM issue #753: a 3B model crashed on iOS 26 and a tiny one worked. 1B should fit; anything bigger will not. Gemma 4 E2B is ~3.2 GB: out.
+  - WebGPU: iOS/iPadOS 26 or newer; Chrome on Android 12+ with Qualcomm/ARM GPUs (Chrome 121+); not Firefox on Android. No WebGPU means the fallback below.
+  - Speed: one third-party project measured Gemma 3 1B at ~34 tokens/s on an iPhone 17 Pro in Safari (its own engine, not WebLLM), so a short quest is about 1 to 4 s. Unverified for our setup.
+  - The first download (~0.5 GB) should be on Wi-Fi, then cached; loading into the GPU takes several seconds each session.
+- **Never load the model on page open.** Start it after a tap (a "Make quests smarter" switch or similar), so a model that crashes the tab cannot crash-loop the app. Keep the loaded/not-loaded choice in `localStorage`.
+
+How it plugs in (nothing else changes):
+1. `makeQuest` (`src/quests.ts`) already picks reach candidates (unfound places 150 to 400 m away). Hand 5 to 10 of them to the model as `{id, name, type, distance, direction}`.
+2. Ask for JSON `{id, text}`: which one to send the walker to, and one or two lines of quest text.
+3. **Validate before using it:** `id` must be one of the candidates (never trust coordinates from the model), `text` is plain text with a length cap (set with `textContent`, like place names). Anything else counts as a failure.
+4. `Reach` gets an optional `text`; `goalOf` shows it on the chip/card. Parsing (`parseQuest`) accepts and caps it.
+5. **Fallback is the Phase 6 quests**: no WebGPU, model not loaded yet, load failed, bad output, or timeout all give today's reach/find quest. The game never waits for the model.
+6. Generate ahead of time (when a region loads, or when a quest ends), not on demand while the walker stands waiting.
+
+Steps:
+1. **10-minute check first:** open `chat.webllm.ai` on your phone and a teammate's Android, pick Gemma 3 1B, and time the download, the load and a short reply. If it crashes or crawls, the demo fallback is Ollama on a laptop behind a tunnel (not deployed, only for your own walk), and the write-up says so honestly.
+2. Spike: load the model in the app behind a button, print one reply. Measure on the phone.
+3. Pure pieces first, with Node tests: prompt builder, output validation, the `text` field in `quests.ts`.
+4. Wire into `discovery.ts` (`ensureQuest`) with the fallback; browser test with a fake model that returns good, bad and slow output.
+5. Review loop as for every phase, then a real walk, then write up.
+
+Open questions: the exact prompt and JSON mode (WebLLM can constrain output, to be checked); whether to tell the user a quest was written by the model; how to show "downloading 40%"; what the screen shows while the model loads.
+
+Not in this phase: a model on the server, photo or vision checks, fine-tuning, more than one quest type written by the model.
+
+## Deployment (Render)
+Two Render services from this repo, **branch `feat/load-2km-region-around-current-location`**; `NODE_VERSION=24` on both.
+
+| | Static Site (the app) | Web Service (the places service) |
+|---|---|---|
+| URL | `https://map-mvp-frontend-v2.onrender.com` | `https://map-mvp-api.onrender.com` |
+| Build | `npm ci && npm test && npm run build` | `npm ci` |
+| Run | publish directory `dist` | `node server/places.ts` (health check `/`) |
+| Env | `VITE_PLACES_API=https://map-mvp-api.onrender.com` (baked in at build: changing it needs a redeploy) | none (Render sets `PORT`) |
+| Plan | free | Free sleeps after 15 min and wakes in about a minute with an empty cache; use **Starter** (~$7/month) for demos |
+
+- Checked live: `GET /` gives `"ok"`; `GET /places?lat=1.3413&lng=103.9638` gives 267 places in about 11 s the first time (Overpass), instant when cached.
+- **Warm the regions you will show** after every deploy or restart (the cache is in memory): `curl --compressed "https://map-mvp-api.onrender.com/places?lat=<lat>&lng=<lng>"`. The official Overpass server was down while this was built; the service falls back to OSM France's mirror and kumi.systems.
+- The `onrender.com` address is fixed when a service is created; renaming the service does not change it.
+- **Credits:** the $50 is redeemed under Billing → Credit Balance, in the workspace that owns the services. It is applied at the end of each monthly billing period, not when you start an instance, and a card may still be needed for anything it does not cover. Suspend or delete the web service after the challenge.
+- The GitHub Pages workflow on `main` still exists, but it has no places service, so it only works around SUTD.
+- Challenge: DEV "Hacktoberfest Open-Source AI Challenge: Week 1" (Touch Grass), tag `#hf26challenge`, **submissions due 2026-10-11 11:59 PM PDT** (2026-10-12 about 3 PM in Singapore). Targets: overall, Best Use of Gemma, Best Use of Render. Writing quality is weighted most; the post must say why open mattered; walking outside with it earns bonus points. More in `../walking-maxxing/CLAUDE.md`.
+
 ## Known limits (stated, not solved)
 - Mobile browsers pause GPS when the screen locks, so the screen has to stay on while walking. Background tracking is out of scope.
 - The standard OSM tile servers are fine for light MVP use. Switch tile provider if usage grows.
@@ -414,6 +465,6 @@ Commit message: `feat: load a 2 km region around the current location`
 - `node_modules/` and `dist/` are git-ignored. Commit `package-lock.json`. Pages deploys from the build, not from the repo root.
 
 ## Verification (end to end)
-1. `npm run dev` (only a dev server for the static app; there's no backend) → open `localhost:3000/?debug`, walk around SUTD by tapping, and watch the fog clear and places appear. Reload and the progress stays.
+1. `npm run dev` (the app) and `npm run server` (the places service on :3001; only needed away from SUTD) → open `localhost:3000/?debug`, walk around SUTD by tapping, and watch the fog clear and places appear. Reload and the progress stays.
 2. `npm test` → `ok`, `npm run typecheck` and `npm run build` pass.
 3. Open the Pages URL on the phone, walk around SUTD for 10 minutes, and confirm the fog clears along the real route and nearby places are discovered.

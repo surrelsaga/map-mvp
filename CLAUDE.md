@@ -12,10 +12,10 @@ The screen should be the shortest part of the experience. The map is glanced at,
 - Cover everything with fog.
 - Reveal a circle around the user as they move (radius is a tunable constant, roughly 30-50 m).
 - Persist revealed areas on the device, so reopening the app keeps the progress.
-- Works without any server of ours. Location history never leaves the device (this is part of the "why open" story).
+- Fog, progress, finds and quests live only on the device; location history never leaves it (part of the "why open" story). The one server is a small places service on Render (Phase 7) that is told a point rounded to ~550 m, once per new region, and returns nearby places from OpenStreetMap. No accounts, no database.
 
 ## Not in MVP
-Accounts, sync, sharing, multiple cities, background tracking polish, fog animations.
+Accounts, sync, sharing, background tracking polish, fog animations. (Other cities now work: the 2 km region follows you, Phase 7.)
 
 ## Interface the quests need from the map
 Side quests are tied to real places, so the map must be able to answer:
@@ -31,7 +31,10 @@ How quests actually hook in (Phase 6, `PLAN.md`): through `discovery.ts` and its
 - Location data is sensitive, so store it locally only.
 
 ## Stack (decided)
-Web app, Leaflet + OSM tiles, fog as grid cells on a canvas overlay, localStorage, a click-to-walk `?debug` mode. Vite + TypeScript, deployed to GitHub Pages by Actions. Run it with `npm install && npm run dev`. Architecture and build phases are in `PLAN.md`.
+Web app, Leaflet + OSM tiles, fog as grid cells on a canvas overlay, localStorage, a click-to-walk `?debug` mode. Vite + TypeScript. Deployed on Render: a static site for the app plus one web service for places (`server/places.ts`); the GitHub Pages workflow on `main` still exists but has no places service. Run it with `npm install && npm run dev` (add `npm run server` away from SUTD). Architecture, build phases and the Render setup are in `PLAN.md`.
+
+## Where things stand
+Phases 0 to 7 are built (fog, saved progress, places, UI, two no-AI quests, 2 km regions around you). **Next: Phase 8, AI quests with Gemma 3 1B running on the phone via WebGPU** (planned in `PLAN.md`, not built). Challenge deadline is 2026-10-11 11:59 PM PDT; see `PLAN.md` "Deployment" and `../walking-maxxing/CLAUDE.md`.
 
 ## Open decisions (plan here)
 - Web app vs native/PWA. GPS and "walking with the phone" favour a PWA.
