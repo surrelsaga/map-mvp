@@ -51,6 +51,7 @@ export function showQuest(q: QuestView | null, reveal = false) {
   $('questLine').textContent = q.line;
   $('questDetail').textContent = q.detail;
   $('questBy').hidden = !q.byGemma;
+  offerDone = q.goal.done; syncOffer();                                 // no offer on a card that is celebrating
   if (reveal && open !== 'stats' && !hintOpen) openCard('quest');
 }
 
@@ -61,9 +62,12 @@ export function showGemma(on: boolean, note: string, usable = true) {
   sw.setAttribute('aria-checked', String(on));
   sw.querySelector('.state')!.textContent = on ? 'On' : 'Off';
   $('gemmaNote').textContent = note;
-  $('questGemma').hidden = on || !usable;                              // the card offers it only while it is off and possible
-  $('questGemmaMb').textContent = `· ${GEMMA_MB} MB, Wi-Fi`;
+  offerOk = !on && usable; syncOffer();                                 // the card offers it only while it is off and possible
+  $('questGemmaMb').textContent = `${GEMMA_MB} MB download, best on Wi-Fi`;
 }
+
+let offerOk = false, offerDone = false;
+const syncOffer = () => { $('questGemma').hidden = !offerOk || offerDone; };
 
 // At most one card is open: the panel under the button, or the quest card under the pill.
 type Card = 'stats' | 'quest' | null;

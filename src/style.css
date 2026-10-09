@@ -87,7 +87,7 @@ html, body { margin: 0; overflow: hidden; }
   display: block; box-sizing: border-box; width: 100%; min-height: 48px; margin-top: 12px; padding: 8px 14px; border: 1.5px solid var(--dusk); border-radius: 12px;
   background: none; color: var(--daylight); font: 700 16px/1.3 var(--ui); text-align: left;
 }
-#questGemma span { font-weight: 400; color: var(--dusk); white-space: nowrap; }
+#questGemma span { display: block; margin-top: 2px; font-size: 14px; font-weight: 400; color: var(--dusk); }
 
 /* the panel: two headed sections, "Today" and "Settings". No borders or rules inside: spacing and the headings do the separating. */
 #stats {

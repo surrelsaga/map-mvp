@@ -40,7 +40,7 @@ let pos: Fix | null = null;                          // where you are, from the 
 // Quests (Phase 9). A quest outlives a region change: its target is a point, and the places list is only needed to write about it.
 let quest: quests.Quest | null = null;              // the active quest (a finished one stays here for QUEST_NEXT_MS, so its card can say "Found it")
 let questKey = '', lastSeq = -1;                    // where it is saved ('' = quests are off), and the number of the latest quest (the next one is lastSeq + 1)
-let shownLabel = '', shownSeq = -1;                 // what the quest pill says now, and which quest has had its card opened
+let shownLabel = '', shownSeq = -1, shownDone = -1;    // what the quest pill says now, which quest has had its card opened, and which one's "Found it" has
 let writing = -1;                                   // the quest Gemma is writing a line for (-1: none)
 let warned = false;                                 // the "heading away" alert has been given (again once you come back within the start distance)
 
@@ -69,16 +69,18 @@ function factsFor(q: quests.Quest): questText.Facts {
 
 // The quest pill (top right) and its card. A finished reach quest says what the hint was pointing at, so the walker sees the riddle resolve.
 function showQuest(reveal = false) {
-  if (!quest) { shownSeq = -1; hud.showQuest(null); return; }
+  if (!quest) { shownSeq = -1; hud.showQuest(null); return; }   // (shownDone stays: a quest is never numbered twice)
   const goal = quests.goalOf(quest, pos);
   shownLabel = goal.label;
   const hint = quest.text ?? questText.template(factsFor(quest));
   const name = quest.kind === 'reach' && quest.done ? placeList.find((p) => places.placeKey(p) === (quest as quests.Reach).key)?.name : undefined;   // what the hint was pointing at
   const short = quest.done ? 'Done' : quest.kind === 'reach' ? quests.label(quests.distanceTo(quest, pos)) : `${quest.ids.length}/${quest.need}`;
   // A new quest opens its card once: right away, or (when Gemma is about to write the line) when the line is ready, so the hint doesn't change under the reader's eyes.
-  const open = reveal || (quest.seq !== shownSeq && (quest.text !== undefined || !gemma.isReady()));
+  const arrived = quest.done && shownDone !== quest.seq;                // a finished quest shows its payoff once
+  const open = reveal || arrived || (quest.seq !== shownSeq && (quest.text !== undefined || !gemma.isReady()));
   hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : hint, detail: name ? hint : goal.detail, byGemma: !!quest.text && !name }, open);
   if (open) shownSeq = quest.seq;
+  if (arrived) shownDone = quest.seq;
 }
 
 // Asks Gemma for the quest's line, if it is loaded and the quest has none yet. Until it answers (or if GEMMA_TRIES answers all fail the checks) the plain line shows.
