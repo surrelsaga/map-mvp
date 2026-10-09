@@ -44,7 +44,8 @@ export const DAILY_GOAL = 3;              // new places to find per day: the goa
 export const TODAY_KEY = 'fogwalk:today'; // per-device count of today's finds; debug mode adds ':debug'
 export const FOUND_KEY = 'fogwalk:found:v1';   // every place this device has found (their keys), wherever the fog came from; debug mode adds ':debug'
 export const FOUND_MAX = 5_000;           // bounds what that list, or a damaged value, can cost (a place key is ~16 characters: about 100 KB at most)
-export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open hint has been dismissed
+export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open bubble has been dismissed
+export const OPENED_KEY = 'fogwalk:opened'; // set once the Today panel has been opened
 
 // Quests (two simple ones, no AI: reach a marked spot, then find new places; they alternate)
 export const QUEST_MIN_M = 150;           // a reach quest picks an unfound place at least this far away...

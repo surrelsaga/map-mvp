@@ -1,5 +1,5 @@
 // Today's goal: how many new places have been found today. The pure helpers need no browser; the small store keeps the count on this device.
-// The chip's ring shows exactly one goal: a quest's when one is active (quests.ts builds a Goal too), else this one.
+// The Today button's ring shows this goal. (quests.ts builds a Goal of the same shape, for the AI quests later.)
 import { DAILY_GOAL, TODAY_KEY, FOUND_KEY, FOUND_MAX } from './config.ts';
 
 export interface Today { date: string; ids: string[] }              // which places were found today (by key), so the same place can never count twice

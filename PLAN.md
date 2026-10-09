@@ -314,7 +314,7 @@ Why this shape:
 - **One region at a time:** download and storage stay bounded (~27 KB for SUTD, ~190 KB for central Tokyo, ~840 KB for central London, measured), and it works in any city.
 - **Re-centre on leaving, not on every step:** a circle that slid with you would refetch constantly, and "% explored" would never hold still.
 - **The fog is untouched.** It's a set of cells you walked on a global grid (`fog.ts`), already saved in `localStorage`. Progress storage depends on how much you walk, not on what's loaded, so no backend or database is needed for progress.
-- **Ready for AI quests (Phase 8):** each region is a bounded, cached `Place[]`. The quest generator picks candidates from it (`makeQuest`'s 150–400 m band) and the model only writes the quest. Completion stays GPS-based, as now.
+- **Ready for AI quests (Phase 9):** each region is a bounded, cached `Place[]`. The quest generator picks candidates from it (`makeQuest`'s 150–400 m band) and the model only writes the quest. Completion stays GPS-based, as now.
 
 ### What changes, what doesn't
 Not touched: the fog and its saving, today's count (it counts place ids), quest logic (it works on whatever list it gets), and place validation (`parsePlaces`).
@@ -383,7 +383,7 @@ Known limits (stated, not solved):
 - A first-ever open with no network has the fog but no places (unless you're near SUTD).
 - A dense city centre is large: central London was 8,536 places, ~840 KB per region, so 3 kept regions can take ~2.5 MB of the ~5 MB `localStorage`, next to the fog. A failed write is logged and the region stays in memory only. Lower `REGION_KEEP` or move to IndexedDB if that bites.
 
-Not in this phase: AI quests (Phase 8), drawing the region circle on the map, a place search or "go to another city", a bigger or adjustable radius, prefetching neighbouring regions, self-hosted Overpass, and a persistent server cache.
+Not in this phase: AI quests (Phase 9), drawing the region circle on the map, a place search or "go to another city", a bigger or adjustable radius, prefetching neighbouring regions, self-hosted Overpass, and a persistent server cache.
 
 ### As built (differences from the plan above, and what was checked)
 - **The shipped SUTD file is never stored.** Only regions that came from the service are kept (`fogwalk:regions:v1`, no second "current" key: the first one is current). `pickRegion` has a fourth answer, `seed`: near SUTD with nothing stored covering you, read `places.json` again. This keeps the earlier browser tests exactly as they were (a test that serves its own `places.json` is not shadowed by a stored copy). When nothing is stored the app reads the seed at start-up, as before, and the first fix then keeps it or swaps it.
@@ -455,36 +455,115 @@ As built (differences from the plan above):
 
 Commit message: `fix: count finds under fog cleared before a region loaded`
 
-**8. AI quests on the phone** (planned, not built). Decisions below were made after research; nothing is implemented.
+**8. Today panel: a cleaner left button, simple quests off** ✅ built, awaiting your check. Agreed with the user on 2026-10-10; all UI work uses the `ui-ux-pro-max` skill and is designed phone first (checked at 390 × 780 before anything else).
 
-Goal: the quest text for a reach quest is written by an open model (Gemma 3 1B) that runs **on the phone** in the browser, so the "why open" story is: open weights, free to run, works offline once downloaded, and no prompt or position leaves the phone. Completion does not change: a reach quest still finishes when the fog clears its place (`quests.progress`).
+Goal: the top-left button becomes one small, clearly labelled entry point for **progress and settings**. The simple quests (Phase 6) leave the left side, because quests will come back as AI quests behind their own icon at the top right (Phase 9). Fewer things on screen, and a first-time user can still find everything.
+
+Decisions (option "A1" from the discussion):
+- **The button reads "Today" with a gear:** `( ◔ Today ⚙ )`. The ring shows today's goal filling up; the gear says "settings are in here"; the word is a real title, not a status. One tap target, about 120 px wide and 48 px tall (today's is ~330 px), so the top-right stays free for the AI icon.
+- **One panel, two headed sections, "Today" and "Settings",** matching the button's word. The panel has a close button (×) in its header.
+- **Keep the palette** (fog navy, gold = found, blue = you) and the existing SVG icons for the four kinds of place (gold discs: fork and knife, bag, tree, star). No emoji anywhere.
+- **The button keeps a visible edge.** It is what gives a control 3:1 contrast against the dark fog (WCAG non-text contrast, the Phase 5 rule); a shadow alone does not show on dark fog. "Cleaner" comes from removing the borders and dividers *inside* the panel, one corner radius and an 8 px spacing scale.
+
+Closed state (phone, 390 px):
+```
+┌──────────────────────────────┐
+│ ( ◔ Today ⚙ )                │   top-right left empty for the AI icon (Phase 9)
+│                              │
+│            (map)             │
+│                              │
+│              (toast)         │   unchanged, near the bottom
+│                         (⌖)  │   recentre, unchanged
+└──────────────────────────────┘
+```
+Open panel:
+```
+┌────────────────────────────┐
+│ Today                    × │   heading + close (44 px)
+│ ◔  1 of 3 new places       │   today's goal; "Today's goal done" once met
+│ 12 of 283 found            │
+│ (food) 12/128 (shop) 3/71  │   the four kinds: existing SVG disc + count, 2 × 2
+│ (tree) 1/23   (star) 0/61  │   (each cell read out as "Food & drink: 12 of 128")
+│ ▓▓░░░░░ 0.4% explored      │
+│ Last: Kopi Corner        › │   tappable, as today
+│                            │
+│ Settings                   │   heading
+│ Sound               [ on ] │
+└────────────────────────────┘
+```
+(Words in brackets stand for the existing SVG gold discs from `icons.ts`; no emoji.) With nothing found yet, the "found / kinds / explored" block is replaced by one line: "Walk to clear the fog. Places appear as you uncover them." The AI switch is added to Settings in Phase 9 (spec there), not before: there is nothing for it to switch yet.
+
+First-time user:
+1. **One-time bubble** under the button: "Your progress and settings are here." It replaces today's "Walk to clear the fog…" card, goes away on the first tap anywhere, and is remembered (`fogwalk:hinted`, the existing flag).
+2. **One-time nudge at the first find:** the toast's second line says "Tap Today to see your progress" if the panel has never been opened (new flag `fogwalk:opened`, set when the panel first opens).
+3. The ring starts empty and fills with the first finds; the gear is on the button from the start.
+
+Accessibility (ui-ux-pro-max priorities 1 and 2): the button is a `<button>` with `aria-expanded` / `aria-controls` and the label "Today: 1 of 3 places. Progress and settings"; the gear and ring are decorative (`aria-hidden`); the close button is labelled "Close"; every target is at least 44 × 44 px; Escape and a tap on the map close the panel (as today); focus returns to the button; text contrast stays as `tests/design.test.ts` checks it; reduced motion is respected (as today).
+
+Simple quests off (code kept for Phase 9):
+- `discovery.ts`: the quest wiring goes (`setQuest`, `ensureQuest`, `restoreQuest`, the shared goal slot, the "Quest done" messages); the goal shown is always today's. `main.ts`: the `?quests` switch goes. `hud.ts` / `index.html`: the `todayLine` and the "Quest" title go.
+- **Kept, unwired, for Phase 9:** `src/quests.ts` (candidate picking, progress, the stored quest and its parsing), `src/questLayer.ts` (the flag on the map) and `tests/quests.test.ts`. A saved `fogwalk:quest` on a phone is simply ignored.
+- `tests/browser.mjs`: the Phase 6 section is removed (that behaviour is gone); every other section's expectations about the chip text are updated to the new button (it always says "Today"; the goal's wording moves into the panel).
+
+Files: `index.html` (button and panel markup), `src/style.css` (button, panel, 2 × 2 kinds grid, headings, bubble), `src/hud.ts` (button label, sections, close, empty state, nudge), `src/discovery.ts` and `src/main.ts` (quests unwired), `src/flags.ts` reused for the new flag, `tests/browser.mjs`, `tests/design.test.ts` only if a colour changes (none planned).
+
+Steps:
+1. Screenshots of the current UI at 390 × 780 (closed, open, first open) for a before/after.
+2. Unwire the simple quests; tests updated; everything green before any visual change.
+3. Button and panel markup and CSS; ui-ux-pro-max pre-delivery checks (touch targets, labels, contrast, safe areas, no emoji).
+4. First-time bubble and first-find nudge.
+5. Browser tests (a Phase 8 section): the button's text, label and size; panel headings, close, Escape, tap outside; the 2 × 2 counts and their spoken labels; the empty state; the bubble once; the nudge once and not after the panel was opened; the button stays left of the middle of a 390 px screen; nothing overlaps at 320 px wide or with large text.
+6. Screenshots after, the review loop (code-review and ponytail-review), then your check on the phone.
+
+Not in this phase: the AI icon and switch (Phase 9), a light theme, a bottom sheet, moving the toast or recentre button.
+
+As built (differences from the plan above, and what was checked):
+- **The button** is `( ring  Today  gear )`, 132 × 48 px at 390 px wide (it was ~330), with its visible edge and a soft shadow. Its spoken name carries the numbers: "Today: 1 of 3 places. Progress and settings" (or "Today's goal done. Progress and settings"). **Keyboard focus ring:** the shadow had replaced the ring's light band; `#chip:focus-visible` puts both back (a browser test caught this).
+- **The panel** has the headings "Today" (with a 44 px close button) and "Settings"; no borders or dividers inside it, a soft shadow outside. Order: today's goal and what is left, "N of M places found", the four kinds two by two (gold disc, name, "N of M"), "% of the neighbourhood" with its bar, "Last: …", then Settings with Sound. The per-kind bars are gone (the counts say it). The panel is about 480 px tall on a phone (the old card was about 520).
+- **Differences from the plan:** with nothing found yet, the kinds and "Last" are hidden and one line says what to do ("Walk to clear the fog. Places appear as you uncover them."), but "N of M places found" and the **explored % with its bar stay visible** (a code review pointed out that they are true before any find). **The first-open bubble reads "Walk to clear the fog. Your progress and settings are here."**, because someone who never opens the panel would otherwise never be told what the game is.
+- **The first-find pointer** ("Tap Today to see your progress") is added to the very first find's message when the panel has never been opened. It needs one flag (`fogwalk:opened`); "first find ever" comes from the found list, so there is no second flag.
+- **Simple quests off:** `discovery.ts`, `main.ts` and `hud.ts` no longer know about quests; `window.fogMap.quest` and the `?quests` switch are gone. `quests.ts`, `questLayer.ts` and `tests/quests.test.ts` are kept for Phase 9 (the CSS for the quest marker and the `QUEST_*` constants too). **A saved simple quest (`fogwalk:quest`, `:debug`) is deleted when the app opens**, so the AI quests cannot inherit it.
+- **Tests:** the Phase 6 browser section is removed (its unit tests stay; Phase 9 brings browser coverage back with the new wiring). The old chip/card assertions now read the goal from the button's spoken name. New: the button says "Today" and its gear is decoration; the two headings and the close button (named, 44 px, with room for its focus ring, closes and returns focus); the 2 × 2 cells; the empty state; the pointer once, and not for someone who opened the panel; the old saved quest forgotten; at 320 px the button is a one-line target that leaves 56 px free at the top right. Everything else passes unchanged apart from the wording of the checks.
+- **Not done:** a test for large system text sizes, a light theme, and the AI icon itself (Phase 9). Before/after screenshots were taken at 390 × 780 and 320 × 640.
+- Checked with the `ui-ux-pro-max` rules: 44-48 px targets, labelled icon-only buttons, text contrast (`tests/design.test.ts`, unchanged), safe-area insets, no emoji, reduced motion, no horizontal scroll at 320 px.
+
+Commit message: `feat(ui): one "Today" button for progress and settings; simple quests off`
+
+**9. AI quests on the phone** (planned, not built; for a later session). Built **on top of Phase 8**: the left "Today" button stays as it is; the AI quest gets its own icon at the top right. Decisions below were made after research; nothing is implemented.
+
+Goal: the quest text for a reach quest is written by an open model (Gemma 3 1B) that runs **on the phone** in the browser, so the "why open" story is: open weights, free to run, works offline once downloaded, and no prompt or position leaves the phone. Completion does not change: a reach quest finishes when the fog clears its place (`quests.progress`).
 
 Decision and why:
 - **On-device (WebGPU), not on Render.** Render has no GPUs; Ollama on CPU needs a paid instance with 2 GB or more (Standard, ~$25/month or above) and is slow, and it would send place names and a rough position to our server. The only thing on Render is the places service (Phase 7).
 - **Library:** WebLLM first (it ships a prebuilt Gemma 3 1B, listed at ~563 MB download and ~711 MB VRAM, q4f16). Backup: MediaPipe LLM Inference (`.task` file, ~529 MB). Transformers.js is the third choice (no mobile Gemma 3 results found).
 - **Limits found in research (not yet tested on our phones):**
   - iPhone Safari kills a tab at roughly 1.5 GB with no error to catch. WebLLM issue #753: a 3B model crashed on iOS 26 and a tiny one worked. 1B should fit; anything bigger will not. Gemma 4 E2B is ~3.2 GB: out.
-  - WebGPU: iOS/iPadOS 26 or newer; Chrome on Android 12+ with Qualcomm/ARM GPUs (Chrome 121+); not Firefox on Android. No WebGPU means the fallback below.
+  - WebGPU: iOS/iPadOS 26 or newer; Chrome on Android 12+ with Qualcomm/ARM GPUs (Chrome 121+); not Firefox on Android.
   - Speed: one third-party project measured Gemma 3 1B at ~34 tokens/s on an iPhone 17 Pro in Safari (its own engine, not WebLLM), so a short quest is about 1 to 4 s. Unverified for our setup.
   - The first download (~0.5 GB) should be on Wi-Fi, then cached; loading into the GPU takes several seconds each session.
-- **Never load the model on page open.** Start it after a tap (a "Make quests smarter" switch or similar), so a model that crashes the tab cannot crash-loop the app. Keep the loaded/not-loaded choice in `localStorage`.
+- **Never load the model on page open.** It loads only after the user turns it on (the switch below), so a model that crashes the tab cannot crash-loop the app.
 
-How it plugs in (nothing else changes):
-1. `makeQuest` (`src/quests.ts`) already picks reach candidates (unfound places 150 to 400 m away). Hand 5 to 10 of them to the model as `{id, name, type, distance, direction}`.
+Where it lives in the UI (on top of Phase 8; use ui-ux-pro-max, phone first):
+- **The AI icon, top right:** a round 48 px button with an SVG sparkle-style icon (no emoji), labelled "AI quests" for screen readers, with a one-time visible label next to it on first open. Tapping it opens a small quest card under it: the quest text, the distance, and "Show on map". While a quest is active the icon shows a small badge or ring. The quest's place is marked on the map with the existing flag (`questLayer.ts`).
+- **The switch, in the "Today" panel's Settings section** (Phase 8): "AI quests (Gemma)", off by default, with the line "Runs on this phone. ~0.5 GB download, Wi-Fi recommended". Turning it on starts the download and shows progress ("Downloading 40%"); the choice is remembered in `localStorage`.
+- **When there is no model** (switch off, no WebGPU, still downloading, load failed): the icon still opens its card, which says why and what to do ("Turn on AI quests in Settings", "This phone can't run the model", "Downloading…"). The simple quests were removed in Phase 8, so **there is no fallback quest**. (Bringing back the Phase 6 quests as a fallback is possible: their logic is still in `quests.ts`. Decide at the start of Phase 9.)
+
+How it plugs in:
+1. `makeQuest` (`src/quests.ts`, kept from Phase 6) already picks reach candidates (unfound places 150 to 400 m away). Hand 5 to 10 of them to the model as `{id, name, type, distance, direction}`.
 2. Ask for JSON `{id, text}`: which one to send the walker to, and one or two lines of quest text.
 3. **Validate before using it:** `id` must be one of the candidates (never trust coordinates from the model), `text` is plain text with a length cap (set with `textContent`, like place names). Anything else counts as a failure.
-4. `Reach` gets an optional `text`; `goalOf` shows it on the chip/card. Parsing (`parseQuest`) accepts and caps it.
-5. **Fallback is the Phase 6 quests**: no WebGPU, model not loaded yet, load failed, bad output, or timeout all give today's reach/find quest. The game never waits for the model.
-6. Generate ahead of time (when a region loads, or when a quest ends), not on demand while the walker stands waiting.
+4. `Reach` gets an optional `text`; `parseQuest` accepts and caps it. The quest is shown by the AI card (not the left button, which stays "Today"). `quests.progress` completes it; the toast says "Quest done".
+5. Wire it in `discovery.ts` (Phase 8 removed the old wiring; the new one starts quests from the AI icon, not automatically) and in `main.ts`.
+6. Generate ahead of time (when a region loads, or when a quest ends), not while the walker stands waiting.
 
 Steps:
 1. **10-minute check first:** open `chat.webllm.ai` on your phone and a teammate's Android, pick Gemma 3 1B, and time the download, the load and a short reply. If it crashes or crawls, the demo fallback is Ollama on a laptop behind a tunnel (not deployed, only for your own walk), and the write-up says so honestly.
-2. Spike: load the model in the app behind a button, print one reply. Measure on the phone.
+2. Spike: load the model in the app behind the Settings switch, print one reply. Measure on the phone.
 3. Pure pieces first, with Node tests: prompt builder, output validation, the `text` field in `quests.ts`.
-4. Wire into `discovery.ts` (`ensureQuest`) with the fallback; browser test with a fake model that returns good, bad and slow output.
+4. The AI icon and card, the switch, and the wiring; browser tests with a fake model that returns good, bad and slow output, and with no WebGPU.
 5. Review loop as for every phase, then a real walk, then write up.
 
-Open questions: the exact prompt and JSON mode (WebLLM can constrain output, to be checked); whether to tell the user a quest was written by the model; how to show "downloading 40%"; what the screen shows while the model loads.
+Open questions: fallback quests or not (above); the exact prompt and JSON mode (WebLLM can constrain output, to be checked); whether to tell the user a quest was written by the model.
 
 Not in this phase: a model on the server, photo or vision checks, fine-tuning, more than one quest type written by the model.
 

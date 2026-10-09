@@ -1,4 +1,4 @@
-// The progress chip, the stats card it opens, the sound switch, and the first-open hint. DOM only.
+// The "Today" button, the panel it opens (today's goal, what is found, and the settings), and the first-open bubble. DOM only.
 // Everything shown is set with textContent; the only markup built here is static (the pin icons).
 import { GROUP_LABELS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
@@ -8,7 +8,7 @@ const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
 
 export interface Stats {
-  goal: Goal; daily: Goal;                                              // goal = what the chip shows (a quest's, or the daily one when there is none); daily = today's count
+  goal: Goal;                                                           // today's goal: the button's ring and the panel's first line
   found: number; total: number;
   groups: Record<Group, { found: number; total: number }>;
   percent: string; fraction: number;                                    // how much of the neighbourhood is explored: "0.10%" and 0.001
@@ -30,24 +30,21 @@ function setRing(svg: Element, goal: Goal) {
 
 let lastPlace: Place | null = null;
 
-// The chip and the goal ring: all that a new day changes. While a quest holds the chip, the card keeps today's count on a line of its own.
-export function showGoal(goal: Goal, daily: Goal) {
-  $('chipText').textContent = goal.label;
-  $('chip').setAttribute('aria-label', `${goal.label}, progress details`);   // contains the visible text, and stays the same open or closed
+// The button and the goal ring: all that a new day changes. The button always says "Today"; its spoken name carries the numbers.
+export function showGoal(goal: Goal) {
+  $('chip').setAttribute('aria-label', `${goal.done ? 'Today’s goal done' : `Today: ${goal.found} of ${goal.target} places`}. Progress and settings`);
   for (const ring of document.querySelectorAll('#top .ring')) setRing(ring, goal);
-  $('goalTitle').textContent = goal.title;
   $('goalText').textContent = goal.detail;
-  $('todayLine').hidden = goal === daily;
-  $('todayLine').textContent = `Today: ${daily.found} of ${daily.target} places`;
 }
 
-export function showStats({ goal, daily, found, total, groups, percent, fraction, last, note }: Stats) {
-  showGoal(goal, daily);
+export function showStats({ goal, found, total, groups, percent, fraction, last, note }: Stats) {
+  showGoal(goal);
   $('statsPlaces').textContent = note || (total ? `${found} of ${total} places found` : `${found} places found`);
+  $('emptyHint').hidden = found > 0 || !!note;                          // nothing found yet: say what to do, instead of rows of zeros
+  $('progress').hidden = found === 0;
   for (const g of GROUPS) {
     const li = document.querySelector(`#groups li[data-group="${g}"]`)!;
     li.querySelector('.g-count')!.textContent = `${groups[g].found} of ${groups[g].total}`;
-    setBar(li.querySelector('.bar > span') as HTMLElement, groups[g].total ? groups[g].found / groups[g].total : 0, groups[g].found > 0);
   }
   $('statsArea').textContent = `${percent} of the neighbourhood`;
   setBar($('areaBar'), fraction, fraction > 0);
@@ -61,10 +58,14 @@ export interface Controls {
   soundOn: boolean; onSound: (on: boolean) => void;
   onFocus: (place: Place) => void;                                      // "Last: ..." was tapped: show that place on the map
   hintSeen: boolean; onHintSeen: () => void;
+  openedSeen: boolean; onOpened: () => void;                            // the panel has been opened at least once
 }
 
 let hintOpen = false, onHintSeen = () => {};
-// The first-open hint goes away for good once the user taps anywhere or finds a place.
+let opened = false, onOpened = () => {};
+// What the first find ever adds to its message: a pointer to the button, for someone who has not opened it yet. Empty otherwise.
+export const nudge = (firstEver: boolean) => (firstEver && !opened ? 'Tap Today to see your progress' : '');
+// The first-open bubble goes away for good once the user taps anywhere or finds a place.
 export function dismissHint() {
   if (!hintOpen) return;
   hintOpen = false;
@@ -72,24 +73,29 @@ export function dismissHint() {
   onHintSeen();
 }
 
-export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen }: Controls) {
+export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, openedSeen, onOpened: markOpened }: Controls) {
   const chip = $('chip'), panel = $('stats'), sw = $('soundSwitch');
   // the four kinds of place, each with the same gold disc and icon as its pins on the map
   $('groups').replaceChildren(...GROUPS.map((g) => {
     const li = document.createElement('li');
     li.dataset.group = g;
-    li.innerHTML = `${discHtml(g, 13)}<span class="g-body"><span class="g-name"></span><span class="bar" aria-hidden="true"><span></span></span></span><span class="g-count"></span>`;
+    li.innerHTML = `${discHtml(g, 13)}<span class="g-body"><span class="g-name"></span><span class="g-count"></span></span>`;
     li.querySelector('.g-name')!.textContent = GROUP_LABELS[g];
     return li;
   }));
   hintOpen = !hintSeen; onHintSeen = seen;
   $('hint').hidden = hintSeen;
+  opened = openedSeen; onOpened = markOpened;
 
   const isOpen = () => !panel.hidden;
-  const toggle = (open: boolean) => { panel.hidden = !open; chip.setAttribute('aria-expanded', String(open)); };
+  const toggle = (open: boolean) => {
+    panel.hidden = !open; chip.setAttribute('aria-expanded', String(open));
+    if (open && !opened) { opened = true; onOpened(); }
+  };
   const showSound = (on: boolean) => { sw.setAttribute('aria-checked', String(on)); sw.querySelector('.state')!.textContent = on ? 'On' : 'Off'; };   // the name stays "Sound"; the state is read from aria-checked
   showSound(soundOn);
   chip.onclick = () => toggle(!isOpen());
+  $('closeStats').onclick = () => { toggle(false); chip.focus({ preventScroll: true }); };
   sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; showSound(on); onSound(on); };
   $('lastFind').onclick = () => { toggle(false); chip.focus({ preventScroll: true }); if (lastPlace) onFocus(lastPlace); };   // the row is about to disappear: keep focus on the chip
   addEventListener('keydown', (e) => {

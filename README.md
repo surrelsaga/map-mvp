@@ -11,7 +11,7 @@ npm run dev        # http://localhost:3000
 
 Open `http://localhost:3000/?debug` and tap the map to walk without leaving your desk (`?debug=10` walks 10× faster). Debug walks are saved separately from real ones; the **reset fog** button in the red badge clears them.
 
-Quests: a reach quest (walk to a marked spot) and a find quest (uncover 2 new places) alternate on the goal chip. Add `?quests=off` for the plain map with only today's daily goal.
+The **Today** button (top left) opens one panel: today's goal, what you have found, and the settings (sound). The simple quests were taken out of the app in Phase 8; their code stays for the AI quests that come next.
 
 Progress is saved in the browser's `localStorage`, on your device only. So are the stored regions and the sound on/off choice.
 `index.html` can't be opened by double-click: browsers block ES modules on `file://`, so use the dev server.
@@ -50,7 +50,7 @@ node tools/fetch-places.mjs          # regenerates public/places.json (the SUTD 
 
 On Render the service is a Web Service (build `npm ci`, start `node server/places.ts`, `NODE_VERSION=24`, health check `/`), and the static site gets the environment variable `VITE_PLACES_API` set to its URL. Without it, only SUTD and already-stored regions work.
 
-**What leaves your phone:** your walked path, fog, finds and quests never do. For each new region, the service receives one point rounded to about 550 m (never your precise position) and asks OpenStreetMap's Overpass API for the places within 2 km. The service itself does not log it, but the point is part of the request address, so the hosting platform's request logs (Render's) may record it together with your IP address. The map tiles come from OpenStreetMap too, which sees roughly which area is on screen.
+**What leaves your phone:** your walked path, fog and finds never do. For each new region, the service receives one point rounded to about 550 m (never your precise position) and asks OpenStreetMap's Overpass API for the places within 2 km. The service itself does not log it, but the point is part of the request address, so the hosting platform's request logs (Render's) may record it together with your IP address. The map tiles come from OpenStreetMap too, which sees roughly which area is on screen.
 
 Place data © OpenStreetMap contributors, ODbL.
 

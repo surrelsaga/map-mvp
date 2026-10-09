@@ -24,7 +24,7 @@ Side quests are tied to real places, so the map must be able to answer:
 - Did the user reach point P? (GPS-based completion check)
 - Show a marker at P (quest location).
 
-How quests actually hook in (Phase 6, `PLAN.md`): through `discovery.ts` and its goal slot, with "reached" being the same rule as "found". No separate quest API.
+How quests hook in (Phase 6, removed from the UI in Phase 8, `PLAN.md`): "reached" is the same rule as "found". Phase 9 plugs the AI quests in through `quests.ts`.
 
 ## Already known
 - Place data comes from OpenStreetMap, so use an OSM-based map stack (open tiles, no closed map API as the core).
@@ -34,7 +34,7 @@ How quests actually hook in (Phase 6, `PLAN.md`): through `discovery.ts` and its
 Web app, Leaflet + OSM tiles, fog as grid cells on a canvas overlay, localStorage, a click-to-walk `?debug` mode. Vite + TypeScript. Deployed on Render: a static site for the app plus one web service for places (`server/places.ts`); the GitHub Pages workflow on `main` still exists but has no places service. Run it with `npm install && npm run dev` (add `npm run server` away from SUTD). Architecture, build phases and the Render setup are in `PLAN.md`.
 
 ## Where things stand
-Phases 0 to 7 are built (and 7.1, a fix so finds count wherever the fog came from) (fog, saved progress, places, UI, two no-AI quests, 2 km regions around you). **Next: Phase 8, AI quests with Gemma 3 1B running on the phone via WebGPU** (planned in `PLAN.md`, not built). Challenge deadline is 2026-10-11 11:59 PM PDT; see `PLAN.md` "Deployment" and `../walking-maxxing/CLAUDE.md`.
+Phases 0 to 8 are built: fog, saved progress, places, 2 km regions around you, finds that count wherever the fog came from (7.1), and the **Today button** (progress and settings in one panel; the simple quests are off the UI, their code is kept). **Next: Phase 9, AI quests with Gemma 3 1B on the phone via WebGPU, behind an icon at the top right** (planned in `PLAN.md`, built on top of Phase 8). All UI work uses the `ui-ux-pro-max` skill and is designed phone first. Challenge deadline is 2026-10-11 11:59 PM PDT; see `PLAN.md` "Deployment" and `../walking-maxxing/CLAUDE.md`.
 
 ## Open decisions (plan here)
 - Web app vs native/PWA. GPS and "walking with the phone" favour a PWA.
