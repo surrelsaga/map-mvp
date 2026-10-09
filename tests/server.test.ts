@@ -97,22 +97,34 @@ reply = (res) => { res.writeHead(200); res.end(JSON.stringify({ elements: [] }))
 calls = 0;
 const empty = await get('/places?lat=-25&lng=135');
 assert.equal(empty.status, 200);
+assert.equal(empty.headers.get('cache-control'), 'no-store', 'and the phone is told not to keep it either');
 assert.deepEqual((await empty.json()).places, []);
 await get('/places?lat=-25&lng=135');
 assert.equal(calls, 2, 'asked again next time');
 
-// ---- an old copy beats none when Overpass is down; a region never seen still fails
+// ---- an old copy beats none: when Overpass is down, or throttled (200, nothing in it). It is not kept by the phone, and Overpass is not hammered
 {
   const stale = await startServer({ port: 0, overpass, freshMs: 1 });
   const sbase = `http://127.0.0.1:${(stale.address() as AddressInfo).port}`;
+  const ask = (q: string) => fetch(sbase + '/places?' + q);
   reply = (res) => { res.writeHead(200); res.end(JSON.stringify(answer)); };
-  const first = await (await fetch(sbase + '/places?lat=1.35&lng=103.97')).json();
+  const first = await (await ask('lat=1.35&lng=103.97')).json();
+  const first2 = await (await ask('lat=1.4&lng=103.97')).json();
   await new Promise((go) => setTimeout(go, 20));
+  calls = 0;
   reply = (res) => { res.writeHead(500); res.end('down'); };
-  const old = await fetch(sbase + '/places?lat=1.35&lng=103.97');
-  assert.equal(old.status, 200, 'expired but Overpass is down: the old answer is served');
-  assert.deepEqual((await old.json()).places, first.places);
-  assert.equal((await fetch(sbase + '/places?lat=40&lng=40')).status, 502, 'a region never held still fails');
+  const down = await ask('lat=1.35&lng=103.97');
+  assert.equal(down.status, 200, 'expired but Overpass is down: the old answer is served');
+  assert.deepEqual((await down.json()).places, first.places);
+  assert.equal(down.headers.get('cache-control'), 'no-store', 'and the phone is told not to keep an old answer');
+  const asked = calls;
+  await ask('lat=1.35&lng=103.97');
+  assert.equal(calls, asked, 'and Overpass is left alone for a while instead of being asked again by every request');
+  assert.equal((await ask('lat=40&lng=40')).status, 502, 'a region never held still fails');
+  reply = (res) => { res.writeHead(200); res.end(JSON.stringify({ elements: [] })); };       // throttled: 200, nothing in it
+  const thin = await ask('lat=1.4&lng=103.97');
+  assert.deepEqual((await thin.json()).places, first2.places, 'an expired copy also beats an empty refetch');
+  assert.equal(thin.headers.get('cache-control'), 'no-store');
   stale.close();
 }
 

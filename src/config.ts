@@ -28,8 +28,9 @@ export const REGION_ROUND = 0.005;        // degrees (~550 m): a region's centre
 export const REANCHOR_M = 1500;           // walk further than this from the region's centre and a new region is loaded around you (the loaded circle is AREA_RADIUS, so 500 m of places always lie ahead)
 export const REGION_KEEP = 3;             // regions kept on the phone, most recent first
 export const REGION_RETRY_MS = 60_000;    // after a failed load, wait this long before asking again
-export const REGION_MAX_CHARS = 2_000_000;   // stored regions never take more than this of localStorage's ~5 MB, so the fog (fogwalk:v1) always has room (a dense city centre is ~0.8 MB)
+export const REGION_MAX_CHARS = 1_000_000;   // stored regions never take more than this of localStorage's ~5 MB (some browsers count 2 bytes per character), so the fog (fogwalk:v1) always has room; one dense city centre (~0.85 MB) still fits
 export const REGION_KEY = 'fogwalk:regions:v1';   // the kept regions; debug mode adds ':debug'
+export const PLACES_TIMEOUT_MS = 150_000;   // a places-service request that takes longer is a failure (the service may try three Overpass servers in turn, 45 s each)
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
 
 // Look and feel
@@ -41,6 +42,8 @@ export const CHIME_HZ = [659, 880];       // the "found" chime: E5, then A5
 // Today's goal and the first-open hint
 export const DAILY_GOAL = 3;              // new places to find per day: the goal the chip's ring fills toward (quests will take over this slot)
 export const TODAY_KEY = 'fogwalk:today'; // per-device count of today's finds; debug mode adds ':debug'
+export const FOUND_KEY = 'fogwalk:found:v1';   // every place this device has found (their keys), wherever the fog came from; debug mode adds ':debug'
+export const FOUND_MAX = 5_000;           // bounds what that list, or a damaged value, can cost (a place key is ~16 characters: about 100 KB at most)
 export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open hint has been dismissed
 
 // Quests (two simple ones, no AI: reach a marked spot, then find new places; they alternate)

@@ -1,8 +1,8 @@
 // Part of `npm test`. Today's goal: the date rule, counting WHICH places (so none counts twice), the wording, and the per-device store.
 /// <reference types="node" />
 import assert from 'node:assert';
-import { dayKey, countToday, goalOf, readToday, writeToday, todayStoreKey } from '../src/today.ts';
-import { DAILY_GOAL } from '../src/config.ts';
+import { dayKey, countToday, goalOf, readToday, writeToday, readFound, writeFound, foundStoreKey, todayStoreKey } from '../src/today.ts';
+import { DAILY_GOAL, FOUND_MAX } from '../src/config.ts';
 
 // the local date, zero-padded
 assert.equal(dayKey(new Date(2026, 0, 5)), '2026-01-05');
@@ -60,5 +60,20 @@ assert.equal(readToday('k'), null, 'damaged JSON reads as nothing');
 broken = true;
 assert.equal(readToday('k'), null, 'blocked storage reads as nothing');
 assert.doesNotThrow(() => writeToday('k', day(['x'])), 'and writing to it does not throw');
+
+// ---- the found-on-this-device list
+data.clear(); broken = false;
+assert.equal(foundStoreKey(false), 'fogwalk:found:v1'); assert.equal(foundStoreKey(true), 'fogwalk:found:v1:debug', 'simulated walks keep their own list');
+assert.deepEqual(readFound('f'), [], 'nothing found yet');
+writeFound('f', ['node/1', 'node/2', 'node/1']);
+assert.deepEqual(readFound('f'), ['node/1', 'node/2'], 'saved without duplicates, read back in order');
+for (const junk of ['{{{', 'null', '{}', '{"ids":5}', '{"ids":{"a":1}}']) { data.set('f', junk); assert.deepEqual(readFound('f'), [], 'junk gives nothing: ' + junk); }
+data.set('f', JSON.stringify({ ids: ['ok', 5, null, 'x'.repeat(121), 'also ok'] }));
+assert.deepEqual(readFound('f'), ['ok', 'also ok'], 'only short strings survive');
+writeFound('f', Array.from({ length: FOUND_MAX + 5 }, (_, i) => 'id' + i));
+assert.equal(readFound('f').length, FOUND_MAX, 'capped');
+assert.equal(readFound('f').at(-1), 'id' + (FOUND_MAX + 4), 'and it is the newest that stay');
+broken = true;
+assert.deepEqual(readFound('f'), [], 'blocked storage: nothing'); assert.doesNotThrow(() => writeFound('f', ['a']), 'and writing does not throw');
 
 console.log('ok');

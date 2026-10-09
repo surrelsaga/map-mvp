@@ -401,6 +401,60 @@ Not in this phase: AI quests (Phase 8), drawing the region circle on the map, a 
 
 Commit message: `feat: load a 2 km region around the current location`
 
+**7.1 Fix: finds under earlier fog are never counted** ✅ built, awaiting your check
+
+Bug (reported 2026-10-09, reproduced): away from SUTD, a place shows as a pin and in "N of M places found", but the chip, the "Today" line, "Last:", the toast and quests ignore it.
+
+Reproduction (dev server, faked service): session 1, the service fails, a fix lands 20 m from a place and the fog there is saved; session 2, the service works. Result: the pin and "1 of 2 places found", but "Today: 0 of 3", no toast, no "Last:", and a find quest would not count it.
+
+Cause: `discovery.ts` decides "is this a new find?" with `!fog.isRevealed(before, …)`, so anything under the fog saved before the page opened is treated as found on an earlier visit and added quietly. That held while there was one fixed places file: whatever was under old fog had been found, and counted, when it was cleared. With regions it no longer holds. A region can load for the first time over fog cleared earlier: the service was down, asleep or still loading when the app was closed (the official Overpass server was down most of today), or the walk happened before Phase 7 shipped.
+
+Fix: remember which places this device has found, instead of guessing from the fog.
+- A new store, `fogwalk:found:v1` (`:debug` added in debug mode), holding the keys (`placeKey`) of every place found on this device. It sits next to today's store in `today.ts` and uses the same shape: read once at start, and written as stored ∪ this tab, so two tabs can't drop each other's finds. At most 20,000 keys; damaged data reads as empty.
+- `check()`: a find is new (toast, chime, today's count, find quest, "Last:") exactly when its key is not in the store. The keys of everything found are then added. This replaces the `before` fog snapshot, the in-memory `seen` set and `check`'s `announce` parameter, all of which are deleted.
+- Unchanged: a reach quest still completes on any find, quiet or not; found pins and "N of M" stay per region; today's per-day ids still stop a place counting twice in a day.
+- Devices that already have saved fog but no store will see places under that fog announced once on the next open: one "Found N places" message, counted toward that day. This is the simplest option, and it is also what fixes the reported case. No migration is planned (one could keep SUTD finds quiet; say if that is wanted).
+
+Tests:
+- `tests/today.test.ts`: the store (read, merge with another tab's, cap, damaged data).
+- Phase 7 browser section: the reproduction above, now expecting the toast, "Today: 1 of 3", "Last:" and a find quest counting it. Also a reload, and walking back into a kept region, must not announce it again.
+- Phase 6 "saved quest restored, quiet completion": also seed the found store with Spot A. A real device would have it, and without it Spot A would rightly be announced.
+- The Phase 4 and 5b tests stay as they are: they already describe this behaviour ("a place under you when the app opens is a find", "finds from an earlier session are not announced again").
+- Mutation check: put the `before` rule back and the new browser test must fail.
+
+Also fixed in 7.1 (from a code review of the branch, run while investigating). Each of these makes "fog cleared while no region is loaded" more likely, or leaves the wrong places on screen:
+1. **A stalled request blocks all region loading.** The browser's `/places` fetch has no timeout, and `loading` stays true until the page reloads. Fix: `AbortSignal.timeout(150_000)` on the fetch (the server can take up to ~136 s when it tries all three Overpass servers); a timeout counts as a failure (60 s wait, then ask again).
+2. **An empty answer sticks.** It becomes the current region, and nothing is asked again within 1.5 km. Fix: an empty region is kept on screen but asked again after `REGION_RETRY_MS` (60 s) on the next fix.
+3. **The browser caches an empty answer for a day** (`max-age=86400` on every 200). Fix: the server sends `no-store` for an empty region.
+4. **Good data is thrown away when a refetch is empty.** A stale-but-good cached copy loses to a throttled empty refetch. Fix: if the refetch is empty and an old copy exists, serve the old copy, as already happens on errors.
+5. **An old region stays active after a failed load.** The 60 s failure wait returns before the "you are more than 2 km from it" check, so its pins, circle and reach quest stay while you are far away. Fix: drop a region you are more than 2 km from before the wait check.
+6. **Regions could crowd out the fog in `localStorage`.** Browsers may count the quota in UTF-16 bytes (unconfirmed for Safari). Fix: lower `REGION_MAX_CHARS` from 2,000,000 to 1,000,000. One dense centre (London ~840k) still fits, and the fog keeps most of the space.
+7. **Small cleanups:** `load()`'s two flags (`store`, `server`) always match, so they become one. Switching to a stored region no longer rewrites every stored region (it only re-orders them, so the write is skipped).
+
+Not doing, from the same review:
+- Sending the point as a POST body so that it stays out of Render's request logs. The rounded point in the URL is already disclosed in the privacy notes ("Render's platform request logs may record it"). The README wording should say the same, which is a one-line doc fix included here.
+- Merging the four copies of the "localStorage can throw" read/write helpers into one. That's a refactor, not this fix.
+
+Extra tests for these: the browser test for 1 (a request that never answers, then a fix after 60 s asks again); 2 and 5 in the browser suite; 3 and 4 in `tests/server.test.ts`; the cap in `tests/region.test.ts`.
+
+Steps: build, then `npm test` and the browser suite, then the review loop, then push. Both Render services redeploy on push; re-warm the demo regions after. Then your check on the phone, somewhere you walked before.
+
+As built (differences from the plan above):
+- The found list is `fogwalk:found:v1` (`:debug` in debug mode), `{ ids: [...] }`, newest 5,000 kept (about 100 KB at most), each id at most 120 characters. `today.ts` has `readFound` / `writeFound`; `discovery.ts` reads it again before deciding what is new (another tab may have found something) and writes it only when there is a new find. `before`, `seen` and `check`'s `announce` parameter are gone. `discovery.start` takes the found key as a new argument.
+- A **service request now has a 150 s limit** (`PLACES_TIMEOUT_MS`); a timeout, like a 5xx, is not retried at once (a dropped connection still is). **An empty answer from the service** is shown, not stored, not cached by the browser (`no-store`) and **asked again up to twice, a minute apart** (`emptyTries`), then believed. The server also keeps an old cached copy rather than replace it with an empty refetch. Only regions from the service are asked again: an empty SUTD file is not.
+- **Dropping the region you have left now comes before the failure wait**, so a failed load never leaves old pins, circle or a reach quest in place when you are more than 2 km away.
+- `REGION_MAX_CHARS` is now 1,000,000 (one dense city centre still fits; the fog keeps most of the storage). The two flags of `load()` became one (derived from the key). **Not done:** skipping the rewrite when switching to a stored region (planned item 7 above): it only reorders at most three regions, on the rare crossing between them, and skipping it would make a reload open on an older region.
+- **Test hook:** `window.__tuning = { timeoutMs, retryMs }` (read in `discovery.ts`) lets the browser tests shorten the two waits. It is honoured only on the dev server (`import.meta.env.DEV`); the production bundle does not contain it (checked).
+- **Second code review, and what it changed:**
+  - The timeout uses an `AbortController`, not `AbortSignal.timeout` (missing before iOS 16), and covers the whole answer.
+  - **Devices that already had fog before the found list existed** keep what they saw: the first time this version opens, the places under the fog saved at that moment count as found, quietly (`legacyFog`, one session; an empty list is written first so it never repeats). Without it such a device would get one "Found 47 places" burst and an instantly completed daily goal.
+  - The debug **reset** also clears the debug found list (before, re-walking after a reset announced nothing).
+  - **Server:** an old cached copy is served when Overpass fails or answers with nothing, is not kept by the phone (`no-store`), and Overpass is left alone for 10 minutes before the next try, instead of being asked again by every request. The gzip is no longer computed for an answer that is thrown away.
+- Tests: `today.test.ts` (the found list), `region.test.ts` (new cap), `server.test.ts` (no-store for empty, an old copy beats an empty refetch), and a Phase 7.1 section in `tests/browser.mjs`: the reported bug (places load over old fog: announced, counted in today, "Last:", stored, then not again after a reload or after walking out and back), a find quest and today counting it, a hung request, an empty answer asked again (and not for ever), the old region dropped despite the failure wait, a device with older fog staying quiet once, and the debug reset forgetting finds. One Phase 6 test now also seeds the found list, as a real device would have it. Checked by breaking the behaviour on purpose: putting the old fog rule back fails "it is announced"; putting the wait before the drop fails "the region left behind is gone". (The legacy-fog rule and the debug reset were not mutation-checked.)
+- Seen while testing: an older device with saved fog and no found list will see the places under that fog announced once, on its next open.
+
+Commit message: `fix: count finds under fog cleared before a region loaded`
+
 **8. AI quests on the phone** (planned, not built). Decisions below were made after research; nothing is implemented.
 
 Goal: the quest text for a reach quest is written by an open model (Gemma 3 1B) that runs **on the phone** in the browser, so the "why open" story is: open weights, free to run, works offline once downloaded, and no prompt or position leaves the phone. Completion does not change: a reach quest still finishes when the fog clears its place (`quests.progress`).

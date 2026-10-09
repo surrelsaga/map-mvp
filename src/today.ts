@@ -1,6 +1,6 @@
 // Today's goal: how many new places have been found today. The pure helpers need no browser; the small store keeps the count on this device.
 // The chip's ring shows exactly one goal: a quest's when one is active (quests.ts builds a Goal too), else this one.
-import { DAILY_GOAL, TODAY_KEY } from './config.ts';
+import { DAILY_GOAL, TODAY_KEY, FOUND_KEY, FOUND_MAX } from './config.ts';
 
 export interface Today { date: string; ids: string[] }              // which places were found today (by key), so the same place can never count twice
 export interface Goal { title: string; found: number; target: number; done: boolean; progress: number; label: string; detail: string }   // label = the chip's text, detail = the line in the card
@@ -39,3 +39,21 @@ export function writeToday(key: string, value: Today) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not remembered */ }
 }
 export const todayStoreKey = (debug: boolean) => TODAY_KEY + (debug ? ':debug' : '');
+
+// Every place this device has ever found (their keys). A find is new exactly when it is not in here, wherever the fog under it came from:
+// fog cleared while no places were loaded (service down, asleep or slow) is still unclaimed until the places arrive.
+// Untrusted when read: anything that is not a list of short strings gives nothing; the newest FOUND_MAX stay.
+export function parseFound(raw: unknown): string[] {
+  const ids = (raw as { ids?: unknown } | null)?.ids;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string' && x.length <= 120).slice(-FOUND_MAX) : [];
+}
+export function hasFound(key: string): boolean {
+  try { return localStorage.getItem(key) !== null; } catch { return true; }   // storage that throws cannot be told apart from a first run: treat it as not a first run
+}
+export function readFound(key: string): string[] {
+  try { return parseFound(JSON.parse(localStorage.getItem(key) ?? 'null')); } catch { return []; }
+}
+export function writeFound(key: string, ids: Iterable<string>) {
+  try { localStorage.setItem(key, JSON.stringify({ ids: [...new Set(ids)].slice(-FOUND_MAX) })); } catch { /* not remembered */ }
+}
+export const foundStoreKey = (debug: boolean) => FOUND_KEY + (debug ? ':debug' : '');

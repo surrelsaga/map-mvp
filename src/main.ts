@@ -30,7 +30,7 @@ hud.init({
 const questsOn = new URLSearchParams(location.search).get('quests') !== 'off';   // ?quests=off: the plain map with only today's goal (the old behaviour)
 const regionKey = regions.regionStoreKey(debug !== null);
 const placesApi = ((import.meta.env.VITE_PLACES_API as string | undefined) ?? '').replace(/\/+$/, '');   // the Render service; unset = only SUTD and the stored regions
-const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
 if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
@@ -57,7 +57,7 @@ if (debug === null) {
   me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
-  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); quests.clearQuest(quests.questStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
+  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); quests.clearQuest(quests.questStoreKey(true)); storage.clearFog(today.foundStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 

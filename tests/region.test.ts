@@ -73,12 +73,12 @@ assert.deepEqual(readRegions(key), [tokyo, osaka].map((r) => ({ ...r, places: r.
 for (const junk of ['not json', '{}', '{"regions":5}', '{"regions":[null,5,{"center":1}]}', 'null']) { mem.set(key, junk); assert.deepEqual(readRegions(key), [], `junk gives nothing: ${junk}`); }
 mem.set(key, JSON.stringify({ regions: [good, { center: 'x' }, good, good, good, good] }));
 assert.equal(readRegions(key).length, REGION_KEEP, 'bad ones are skipped, and no more than REGION_KEEP come back');
-// the budget: a dense city is ~0.9 MB, so the oldest of three goes; one that is too big alone is not written and does not wipe what is stored
-const big = (lat: number) => region(lat, lat, 13000);
+// the budget: three regions of ~0.42 MB do not fit in 1 MB, so the oldest goes; one that is too big alone is not written and does not wipe what is stored
+const big = (lat: number) => region(lat, lat, 6000);
 mem.clear(); writeRegions(key, [big(1), big(2), big(3)]);
 assert.deepEqual(readRegions(key).map((r) => r.center.lat), [1, 2], 'newest first, and the oldest dropped to fit');
 assert((mem.get(key) ?? '').length <= REGION_MAX_CHARS, 'under the budget');
-writeRegions(key, [region(9, 9, 60000), big(1)]);
+writeRegions(key, [region(9, 9, 30000), big(1)]);
 assert.deepEqual(readRegions(key).map((r) => r.center.lat), [1, 2], 'a region too big even alone: nothing written, the old ones stay');
 (globalThis as unknown as { localStorage: unknown }).localStorage = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('full'); } };
 assert.deepEqual(readRegions(key), [], 'blocked storage: nothing, no crash');

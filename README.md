@@ -50,7 +50,7 @@ node tools/fetch-places.mjs          # regenerates public/places.json (the SUTD 
 
 On Render the service is a Web Service (build `npm ci`, start `node server/places.ts`, `NODE_VERSION=24`, health check `/`), and the static site gets the environment variable `VITE_PLACES_API` set to its URL. Without it, only SUTD and already-stored regions work.
 
-**What leaves your phone:** your walked path, fog, finds and quests never do. For each new region, the service receives one point rounded to about 550 m (never your precise position) and asks OpenStreetMap's Overpass API for the places within 2 km. The map tiles come from OpenStreetMap too, which sees roughly which area is on screen.
+**What leaves your phone:** your walked path, fog, finds and quests never do. For each new region, the service receives one point rounded to about 550 m (never your precise position) and asks OpenStreetMap's Overpass API for the places within 2 km. The service itself does not log it, but the point is part of the request address, so the hosting platform's request logs (Render's) may record it together with your IP address. The map tiles come from OpenStreetMap too, which sees roughly which area is on screen.
 
 Place data © OpenStreetMap contributors, ODbL.
 

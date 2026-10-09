@@ -1085,7 +1085,10 @@ let q;
   const reach = { kind: 'reach', seq: 0, done: false, key: `Spot A|${lat}|${lng}`, lat, lng, start: 250 };
   const seeded = (fogKeys) => async (p) => {
     await captureFix(p); await fakePlaces({ places })(p);
-    await p.evaluateOnNewDocument((r, keys, fogKey) => { localStorage.setItem('fogwalk:quest', JSON.stringify(r)); if (keys) localStorage.setItem(fogKey, JSON.stringify({ keys })); }, reach, fogKeys, REAL);
+    await p.evaluateOnNewDocument((r, keys, fogKey) => {
+      localStorage.setItem('fogwalk:quest', JSON.stringify(r));
+      if (keys) { localStorage.setItem(fogKey, JSON.stringify({ keys })); localStorage.setItem('fogwalk:found:v1', JSON.stringify({ ids: [r.key] })); }   // a device that cleared this fog had found Spot A too
+    }, reach, fogKeys, REAL);
   };
   const open1 = await open('', seeded(null), QUEST); await sleep(800);
   q = await questState(open1);
@@ -1241,6 +1244,138 @@ console.log('Phase 7: regions');
   assert.equal(home.length, 0, 'no request near SUTD');
   assert.equal(await ls(p, REGIONS), null, 'and the shipped file is not stored');
   await p.close(); t('near SUTD: no request ok');
+}
+
+console.log('Phase 7.1: the same behaviour wherever you are');
+{ // helpers: a faked places service, and fixes at a given spot
+  const C = { lat: 35.675, lng: 139.65 };
+  const region = (c, names) => ({ source: 'OpenStreetMap contributors (ODbL)', fetched: '2026-10-09', center: c, radius: 2000,
+    places: names.map((name, i) => ({ id: `node/${i + 1}`, name, type: 'cafe', lat: c.lat + dN(20 + i * 300), lng: c.lng })) });
+  const service = (answer, calls) => async (p) => {                  // answer(callNumber, centreAskedFor) = a region, a status number, or 'hang' (never answered)
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().includes('/places?')) return r.continue();
+      calls.push(r.url());
+      const u = new URL(r.url());
+      const a = answer(calls.length, { lat: Number(u.searchParams.get('lat')), lng: Number(u.searchParams.get('lng')) });
+      if (a === 'hang') return;
+      const headers = { 'access-control-allow-origin': '*' };
+      if (typeof a === 'number') return r.respond({ status: a, contentType: 'application/json', headers, body: '{"error":"x"}' }).catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', headers, body: JSON.stringify(a) }).catch(() => {});
+    });
+  };
+  const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 10 });
+  const total = (p) => stats(p).then((s) => s.places);
+  const tune = (t) => (p) => p.evaluateOnNewDocument((t) => { window.__tuning = t; }, t);
+  const phone = async () => { const c = await browser.createBrowserContext(); await c.overridePermissions(ORIGIN, ['geolocation']); return c; };
+
+  // the reported bug: places load for the first time over fog cleared in an earlier visit (the service was down then)
+  const device = await phone();
+  const down = [];
+  let p = await open('', async (p) => { await service(() => 502, down)(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'), 'visit 1: no places: ' + await total(p));
+  assert((await count(p)) > 20, 'but the fog clears');
+  await p.evaluate(() => dispatchEvent(new Event('pagehide')));        // the fog is saved
+  await p.close();
+  const up = [];
+  p = await open('', async (p) => { await service(() => region(C, ['Under Old Fog', 'Far Cafe']), up)(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'visit 2: the place under the old fog is found: ' + await total(p));
+  assert.deepEqual(await pins(p), ['Under Old Fog']);
+  assert((await toasts(p)).includes('Found Under Old Fog'), 'it is announced: ' + (await toasts(p)).join('|'));
+  let st = await stats(p);
+  assert.equal(st.chip, '1 of 3 places today', "and it counts toward today's goal"); assert.equal(st.last, 'Last: Under Old Fog');
+  assert.deepEqual(JSON.parse(await ls(p, 'fogwalk:found:v1')).ids, ['node/1'], 'and the device remembers it');
+  await sleep(300); await p.close();
+  // visit 3: a reload does not announce or count it again
+  p = await open('', async (p) => { await service((n, c) => region(c, c.lat === C.lat ? ['Under Old Fog', 'Far Cafe'] : ['Elsewhere']), [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'));
+  await sleep(500);
+  assert.deepEqual(await toasts(p), [], 'visit 3: not announced again');
+  assert.equal((await stats(p)).chip, '1 of 3 places today', 'nor counted twice');
+  assert.deepEqual(await pins(p), ['Under Old Fog'], 'its pin is there');
+  // walk out to another region and back to this one: still not announced again
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'the next region: ' + await total(p));
+  await fixAt(p, C.lat + 0.00001, C.lng);
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'back in the first region');
+  assert.deepEqual((await toasts(p)).filter((x) => x.startsWith('Found')), [], 'returning to a region does not announce its finds again');
+  await p.close(); await device.close(); t('places loaded over old fog are found, once ok');
+
+  // a find also completes a quest when the place is under fog from an earlier visit
+  const qdev = await phone();
+  p = await open('', async (p) => { await service(() => 502, [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: qdev, quests: true });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'));
+  await p.evaluate(() => dispatchEvent(new Event('pagehide'))); await p.close();
+  p = await open('', async (p) => { await service(() => region(C, ['Under Old Fog', 'Far Cafe', 'Third Cafe']), [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: qdev, quests: true });
+  assert(await waitFor(async () => (await total(p)) === '1 of 3 places found'));
+  assert(await p.evaluate(() => document.getElementById('chipText').textContent) !== 'Find 3 places today', 'the chip shows the quest, not an empty goal');
+  assert((await p.evaluate(() => document.getElementById('todayLine').textContent)).startsWith('Today: 1 of 3'), 'and today counts the find');
+  await p.close(); await qdev.close(); t('quest + today see finds under old fog ok');
+
+  // a request that never answers is a failure after the time limit, and is asked again after the wait
+  const hung = [];
+  const hdev = await phone();
+  p = await open('', async (p) => { await tune({ timeoutMs: 700, retryMs: 1200 })(p); await service((n) => (n === 1 ? 'hang' : region(C, ['Shibuya Cafe', 'Far Cafe'])), hung)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: hdev });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet', 6000), 'a hung request becomes a failure: ' + await total(p));
+  assert.equal(hung.length, 1);
+  await sleep(1300); await fixAt(p, 35.6763, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found', 6000), 'and the next step asks again: ' + await total(p));
+  assert.equal(hung.length, 2);
+  await p.close(); await hdev.close(); t('hung request: failure, then asked again ok');
+
+  // an empty answer may be a throttled server: asked again, twice, then believed
+  const empties = [];
+  const edev = await phone();
+  p = await open('', async (p) => { await tune({ retryMs: 800 })(p); await service((n) => (n === 1 ? region(C, []) : region(C, ['Shibuya Cafe'])), empties)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: edev });
+  assert(await waitFor(async () => empties.length === 1));
+  await sleep(300);
+  assert.equal(await total(p), '0 places found', 'an empty region');
+  assert.equal(await ls(p, 'fogwalk:regions:v1'), null, 'is not kept on the phone');
+  await sleep(900); await fixAt(p, 35.6763, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'asked again, and the places arrive: ' + await total(p));
+  assert.equal(empties.length, 2);
+  await p.close();
+  const always = [];
+  const edev2 = await phone();                                           // a device with nothing stored
+  p = await open('', async (p) => { await tune({ retryMs: 500 })(p); await service(() => region(C, []), always)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: edev2 });
+  for (let i = 1; i <= 8; i++) { await sleep(700); await fixAt(p, 35.6762 + i * 0.00001, 139.6503); }
+  assert.equal(always.length, 3, 'a really empty area is asked three times, not for ever (' + always.length + ')');
+  await p.close(); await edev.close(); await edev2.close(); t('empty answer: asked again twice, then accepted ok');
+
+  // you walk out of a region, the next one fails, and you carry on: the region you left must not stay
+  const far = [];
+  const fdev = await phone();
+  p = await open('', async (p) => { await service((n) => (n === 1 ? region(C, ['Shibuya Cafe', 'Far Cafe']) : 502), far)(p); await fixAt(p, C.lat + 0.00005, C.lng); }, { ctx: fdev });
+  assert(await waitFor(async () => (await pins(p)).length === 1), 'a found pin in the first region');
+  await fixAt(p, 35.6876, 139.6576);                                   // 1.6 km out: a new region is asked for, and fails
+  assert(await waitFor(async () => far.length === 2), 'asked for the next region');
+  await sleep(500);
+  await fixAt(p, 35.6924, 139.6624);                                   // 2.2 km out, same new region: the failure wait is still running
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet' && (await pins(p)).length === 0, 4000), 'the region left behind is gone: ' + await total(p) + ' ' + JSON.stringify(await pins(p)));
+  assert.equal(far.length, 2, 'and the failed region is not asked for again at once');
+  await p.close(); await fdev.close(); t('a failed next region does not keep the old one on screen ok');
+
+  // a device that already had fog from before the found list existed: what was under that fog was shown as found, so it stays quiet, once
+  const ldev = await phone();
+  const spot = { lat: C.lat + dN(20), lng: C.lng };                     // 'Under Old Fog' is here
+  const lcalls = [];
+  p = await open('', async (p) => {
+    await p.evaluateOnNewDocument((keys, fogKey) => localStorage.setItem(fogKey, JSON.stringify({ keys })), [cellKey(...cellOf(spot.lat, spot.lng))], REAL);
+    await service(() => region(C, ['Under Old Fog', 'Far Cafe']), lcalls)(p); await fixAt(p, C.lat + 0.00001, C.lng);
+  }, { ctx: ldev });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'legacy device: ' + await total(p));
+  await sleep(500);
+  assert.deepEqual(await toasts(p), [], 'no burst of old finds');
+  assert.equal((await stats(p)).chip, 'Find 3 places today', "and today's goal does not jump");
+  assert.deepEqual(JSON.parse(await ls(p, 'fogwalk:found:v1')).ids, ['node/1'], 'but it is remembered as found');
+  await p.close(); await ldev.close(); t('a device with older fog stays quiet once ok');
+
+  // the debug reset forgets finds too, so re-walking the same route announces them again
+  const dbg = await open('?debug', fakePlaces({ places: [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }] })); await sleep(800);
+  assert.deepEqual(await toasts(dbg), ['Found Right Here']);
+  await dbg.click('#debugReset'); await sleep(2500);
+  assert.deepEqual(await toasts(dbg), ['Found Right Here'], 'after reset it is a find again');
+  await dbg.close(); t('debug reset forgets finds ok');
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));
