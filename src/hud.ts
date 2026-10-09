@@ -1,4 +1,4 @@
-// The progress chip, the stats card it opens, the sound switch, and the first-open hint. DOM only.
+// The progress chip and the stats card it opens (sound and Gemma switches), the quest flag and its card, and the first-open hint. DOM only.
 // Everything shown is set with textContent; the only markup built here is static (the pin icons).
 import { GROUP_LABELS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
@@ -8,7 +8,7 @@ const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
 
 export interface Stats {
-  goal: Goal; daily: Goal;                                              // goal = what the chip shows (a quest's, or the daily one when there is none); daily = today's count
+  goal: Goal;                                                           // today's goal, on the chip
   found: number; total: number;
   groups: Record<Group, { found: number; total: number }>;
   percent: string; fraction: number;                                    // how much of the neighbourhood is explored: "0.10%" and 0.001
@@ -29,19 +29,48 @@ function setRing(svg: Element, goal: Goal) {
 
 let lastPlace: Place | null = null;
 
-// The chip and the goal ring: all that a new day changes. While a quest holds the chip, the card keeps today's count on a line of its own.
-export function showGoal(goal: Goal, daily: Goal) {
+// The chip and the goal ring: all that a new day changes.
+export function showGoal(goal: Goal) {
   $('chipText').textContent = goal.label;
   $('chip').setAttribute('aria-label', `${goal.label}, progress details`);   // contains the visible text, and stays the same open or closed
-  for (const ring of document.querySelectorAll('#top .ring')) setRing(ring, goal);
+  for (const ring of document.querySelectorAll('#chip .ring, #stats .ring')) setRing(ring, goal);
   $('goalTitle').textContent = goal.title;
   $('goalText').textContent = goal.detail;
-  $('todayLine').hidden = goal === daily;
-  $('todayLine').textContent = `Today: ${daily.found} of ${daily.target} places`;
 }
 
-export function showStats({ goal, daily, found, total, groups, percent, fraction, last }: Stats) {
-  showGoal(goal, daily);
+// The quest's flag (top right, with the quest's ring) and its card: the line (Gemma's, or the plain one) and how far along you are.
+// null hides both. `reveal` shows the card, for a quest that has just started (unless you are reading the stats card).
+export function showQuest(q: { goal: Goal; line: string; byGemma: boolean } | null, reveal = false) {
+  $('questBtn').hidden = !q;
+  if (!q) { if (!$('questCard').hidden) openCard(null); return; }
+  $('questBtn').setAttribute('aria-label', `Quest: ${q.goal.label}, details`);
+  setRing($('questBtn').querySelector('.ring')!, q.goal);
+  $('questLine').textContent = q.line;
+  $('questDetail').textContent = q.goal.detail;
+  $('questBy').hidden = !q.byGemma;
+  if (reveal && open !== 'stats') openCard('quest');
+}
+
+// The Gemma switch in the stats card. `note` says what it's doing ("800 MB download", "Downloading 40%"); not `usable`: this browser can't run it.
+export function showGemma(on: boolean, note: string, usable = true) {
+  const sw = $('gemmaSwitch') as HTMLButtonElement;
+  sw.hidden = false; sw.disabled = !usable;
+  sw.setAttribute('aria-checked', String(on));
+  sw.querySelector('.state')!.textContent = on ? 'On' : 'Off';
+  $('gemmaNote').textContent = note;
+}
+
+// At most one card is open: the stats card under the chip, or the quest card under the flag.
+type Card = 'stats' | 'quest' | null;
+let open: Card = null;
+function openCard(which: Card) {
+  open = which;
+  $('stats').hidden = which !== 'stats'; $('chip').setAttribute('aria-expanded', String(which === 'stats'));
+  $('questCard').hidden = which !== 'quest'; $('questBtn').setAttribute('aria-expanded', String(which === 'quest'));
+}
+
+export function showStats({ goal, found, total, groups, percent, fraction, last }: Stats) {
+  showGoal(goal);
   $('statsPlaces').textContent = total ? `${found} of ${total} places found` : `${found} places found`;
   for (const g of GROUPS) {
     const li = document.querySelector(`#groups li[data-group="${g}"]`)!;
@@ -60,6 +89,7 @@ export interface Controls {
   soundOn: boolean; onSound: (on: boolean) => void;
   onFocus: (place: Place) => void;                                      // "Last: ..." was tapped: show that place on the map
   hintSeen: boolean; onHintSeen: () => void;
+  onGemma: (on: boolean) => void;                                       // the Gemma switch was flipped
 }
 
 let hintOpen = false, onHintSeen = () => {};
@@ -71,8 +101,8 @@ export function dismissHint() {
   onHintSeen();
 }
 
-export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen }: Controls) {
-  const chip = $('chip'), panel = $('stats'), sw = $('soundSwitch');
+export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, onGemma }: Controls) {
+  const chip = $('chip'), flag = $('questBtn'), sw = $('soundSwitch');
   // the four kinds of place, each with the same gold disc and icon as its pins on the map
   $('groups').replaceChildren(...GROUPS.map((g) => {
     const li = document.createElement('li');
@@ -84,21 +114,23 @@ export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen }: 
   hintOpen = !hintSeen; onHintSeen = seen;
   $('hint').hidden = hintSeen;
 
-  const isOpen = () => !panel.hidden;
-  const toggle = (open: boolean) => { panel.hidden = !open; chip.setAttribute('aria-expanded', String(open)); };
   const showSound = (on: boolean) => { sw.setAttribute('aria-checked', String(on)); sw.querySelector('.state')!.textContent = on ? 'On' : 'Off'; };   // the name stays "Sound"; the state is read from aria-checked
   showSound(soundOn);
-  chip.onclick = () => toggle(!isOpen());
+  chip.onclick = () => openCard(open === 'stats' ? null : 'stats');
+  flag.onclick = () => openCard(open === 'quest' ? null : 'quest');
   sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; showSound(on); onSound(on); };
-  $('lastFind').onclick = () => { toggle(false); chip.focus({ preventScroll: true }); if (lastPlace) onFocus(lastPlace); };   // the row is about to disappear: keep focus on the chip
+  $('gemmaSwitch').onclick = () => onGemma($('gemmaSwitch').getAttribute('aria-checked') !== 'true');
+  $('lastFind').onclick = () => { openCard(null); chip.focus({ preventScroll: true }); if (lastPlace) onFocus(lastPlace); };   // the row is about to disappear: keep focus on the chip
+  const cardOf = { stats: [$('stats'), chip], quest: [$('questCard'), flag] } as const;
   addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !isOpen()) return;
-    const inside = panel.contains(document.activeElement);
-    toggle(false);
-    if (inside) chip.focus();                                           // focus was in the panel that just disappeared: put it somewhere sensible
+    if (e.key !== 'Escape' || !open) return;
+    const [card, button] = cardOf[open];
+    const inside = card.contains(document.activeElement);
+    openCard(null);
+    if (inside) button.focus();                                         // focus was in the card that just disappeared: put it somewhere sensible
   });
   document.addEventListener('pointerdown', (e) => {                    // any tap dismisses the hint; a tap on the map also closes the card (the browser moves focus to whatever was tapped)
     dismissHint();
-    if (isOpen() && !panel.contains(e.target as Node) && !chip.contains(e.target as Node)) toggle(false);
+    if (open && !cardOf[open].some((el) => el.contains(e.target as Node))) openCard(null);
   });
 }

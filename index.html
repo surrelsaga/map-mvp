@@ -10,6 +10,7 @@
 <body>
 <div id="map"></div>
 <div id="top">
+  <div id="topRow">
   <button id="chip" type="button" aria-label="Find 3 places today, progress details" aria-expanded="false" aria-controls="stats">
     <svg class="ring " viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
       <circle class="ring-track" cx="16" cy="16" r="13"/>
@@ -19,6 +20,15 @@
     <span id="chipText">Find 3 places today</span>
     <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
   </button>
+  <button id="questBtn" type="button" aria-label="Quest, details" aria-expanded="false" aria-controls="questCard" hidden>
+    <svg class="ring" viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+      <circle class="ring-track" cx="16" cy="16" r="13"/>
+      <path class="ring-arc" d="M16 3a13 13 0 1 1 0 26a13 13 0 1 1 0-26" pathLength="1"/>
+      <path class="ring-check" d="M10.5 16.5l3.8 3.8 7.2-7.6"/>
+      <path class="ring-flag" d="M6 21V4M6 5h11l-2.5 4L17 13H6" transform="translate(10.5 10) scale(0.5)"/>
+    </svg>
+  </button>
+  </div>
   <p id="hint" hidden>Walk to clear the fog. Places appear as you uncover them.</p>
   <section id="stats" aria-label="Your progress" hidden>
     <div class="goal">
@@ -29,7 +39,6 @@
     </svg>
       <div><p id="goalTitle">Today</p><p id="goalText"></p></div>
     </div>
-    <p id="todayLine" hidden></p>
     <div class="block">
       <p id="statsPlaces"></p>
       <ul id="groups"></ul>
@@ -46,6 +55,15 @@
       <span>Sound</span>
       <span class="switch-state" aria-hidden="true"><span class="state">On</span><span class="track"><span class="thumb"></span></span></span>
     </button>
+    <button id="gemmaSwitch" type="button" role="switch" aria-checked="false" hidden>
+      <span>Gemma writes quests <span id="gemmaNote" class="note"></span></span>
+      <span class="switch-state" aria-hidden="true"><span class="state">Off</span><span class="track"><span class="thumb"></span></span></span>
+    </button>
+  </section>
+  <section id="questCard" aria-label="Quest" hidden>
+    <p id="questLine"></p>
+    <p id="questDetail"></p>
+    <p id="questBy" hidden>Written by Gemma on this phone</p>
   </section>
   <div id="status" role="status"></div>
 </div>

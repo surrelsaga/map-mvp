@@ -43,3 +43,16 @@ export const QUEST_MAX_M = 400;           // ...and at most this far (the neares
 export const QUEST_FIND = 2;              // new places a find quest asks for
 export const QUEST_NEXT_MS = 5000;        // how long a finished quest stays on the chip before the next one starts
 export const QUEST_KEY = 'fogwalk:quest'; // per-device quest state; debug mode adds ':debug'
+export const QUEST_REVEAL_MS = 5 * 60_000; // a reach quest's spot starts hidden (only the hint); after this long looking, it is marked on the map
+export const QUEST_PAST_M = 60;           // ...or sooner: you got this much closer, then drifted this far back out (walked past it, or lost)
+export const QUEST_FAR_RATIO = 1.5;       // "heading away" alert: you are this many times the starting distance away...
+export const QUEST_FAR_MIN_M = 100;       // ...and at least this much further than at the start (a 150 m quest doesn't nag at 230 m)
+export const CROWD_PX = 22;               // found-place pins closer than this on screen are a crowd: only the newest of them shows (zoom in for the rest)
+
+// Gemma writes the quest line (opt-in: the model downloads once from Hugging Face, then runs on the phone's GPU; nothing about you is sent)
+export const GEMMA_MODEL = 'onnx-community/gemma-3-1b-it-ONNX-GQA';   // Gemma 3 1B, ~800 MB. The 270M model (~300 MB) was tried: it mostly copies the prompt's examples
+export const GEMMA_MB = 800;              // the download size the switch shows before it is turned on
+export const GEMMA_KEY = 'fogwalk:gemma'; // set once the user has turned Gemma on (it then loads from the browser's cache on every visit)
+export const GEMMA_TRIES = 5;             // answers Gemma may give for one quest line before the plain line stays (about 1 s each)
+export const HERE_M = 100;                // a place found this close to you is "where you are" in the quest line
+export const LINE_MAX = 120;              // characters: a quest line longer than this is cut at a sentence end, or not used

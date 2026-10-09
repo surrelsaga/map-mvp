@@ -35,6 +35,8 @@ src/
   sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
   quests.ts         PURE + store: the two test quests (reach, find), next-quest pick, progress, the quest's goal   ✅ phase 6
   questLayer.ts     the quest marker (Leaflet divIcon in the `quest` pane)   ✅ phase 6
+  questText.ts      PURE: the quest line: what Gemma is told, the checks on its answer, the plain line   ✅ phase 7
+  gemma.ts          Gemma 3 1B on the phone's GPU (Transformers.js, WebGPU), opt-in   ✅ phase 7
                     (no api.ts: quests plug into discovery.ts and its goal slot, so no outside interface is needed)
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
@@ -300,3 +302,5 @@ Commit message: `feat: two simple quests (reach a spot, find new places)`
 1. `npm run dev` (only a dev server for the static app; there's no backend) → open `localhost:3000/?debug`, walk around SUTD by tapping, and watch the fog clear and places appear. Reload and the progress stays.
 2. `npm test` → `ok`, `npm run typecheck` and `npm run build` pass.
 3. Open the Pages URL on the phone, walk around SUTD for 10 minutes, and confirm the fog clears along the real route and nearby places are discovered.
+
+**7. Gemma writes the quests** ✅ built, awaiting your check. Branch `feat/add-gemma-written-quest-hints`. Decisions, spike results and limits: [`GEMMA.md`](GEMMA.md).

@@ -8,8 +8,9 @@ import type { LatLng } from './types.ts';
 const icon = L.divIcon({ className: 'quest-pin', iconSize: [32, 32], html: questHtml() });
 let marker: L.Marker | null = null;
 
-// `text` is asked when the popup opens, so it can say how far away the spot is right now.
+// `text` is asked when the popup opens, so it can say how far away the spot is right now. Showing the same spot again keeps the marker (and an open popup).
 export function show(at: LatLng, text: () => string) {
+  if (marker?.getLatLng().equals([at.lat, at.lng])) return;
   clear();
   marker = L.marker([at.lat, at.lng], { icon, pane: 'quest', title: 'Quest spot' })
     .bindPopup(() => { const el = document.createElement('strong'); el.textContent = text(); return el; }, { closeButton: false, offset: [0, -6] })

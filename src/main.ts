@@ -12,8 +12,9 @@ import * as sound from './sound.ts';
 import * as placesLayer from './placesLayer.ts';
 import * as today from './today.ts';
 import * as quests from './quests.ts';
+import * as gemma from './gemma.ts';
 import { getFlag, setFlag } from './flags.ts';
-import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY } from './config.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, GEMMA_KEY, GEMMA_MB } from './config.ts';
 import type { Fix } from './types.ts';
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
@@ -25,9 +26,30 @@ hud.init({
   soundOn: sound.isOn(), onSound: sound.setOn,
   onFocus: (place) => { if (placesLayer.focusPlace(place)) me.stopFollowing(); },   // "Last: ..." in the stats card: show that place on the map, and stay there (not snap back to you on the next fix)
   hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
+  onGemma: switchGemma,
 });
 const questsOn = new URLSearchParams(location.search).get('quests') !== 'off';   // ?quests=off: the plain map with only today's goal (the old behaviour)
 discovery.start(import.meta.env.BASE_URL + 'places.json', today.todayStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+
+// Gemma writes the quest lines, only once switched on (a big download). After that it loads from the browser's cache on every visit.
+function switchGemma(on: boolean) {
+  setFlag(GEMMA_KEY, on);
+  if (!on) { gemma.unload(); hud.showGemma(false, `${GEMMA_MB} MB download, runs on this phone`); return; }
+  hud.showGemma(true, 'Loading…');
+  gemma.load((percent) => hud.showGemma(true, `Downloading ${percent}%`)).then(
+    () => { hud.showGemma(true, 'Runs on this phone, offline'); discovery.onWriterReady(); },
+    (e) => {
+      if (!getFlag(GEMMA_KEY)) return;                                 // switched off while it loaded: nothing went wrong
+      console.warn('Gemma could not load:', e);
+      setFlag(GEMMA_KEY, false);
+      hud.showGemma(false, 'Could not load. Tap to try again');
+    },
+  );
+}
+if (questsOn) {
+  if (!gemma.supported()) hud.showGemma(false, 'Needs WebGPU, which this browser lacks', false);
+  else switchGemma(getFlag(GEMMA_KEY));
+}
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 

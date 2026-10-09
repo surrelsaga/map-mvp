@@ -1,9 +1,9 @@
 // Part of `npm test`. The two test quests: picking a target, counting finds, the chip wording, and the per-device store.
 /// <reference types="node" />
 import assert from 'node:assert';
-import { makeQuest, progress, goalOf, parseQuest, distanceTo, questStoreKey, readQuest, writeQuest, clearQuest, type Quest, type Reach, type Find } from '../src/quests.ts';
+import { makeQuest, progress, goalOf, parseQuest, distanceTo, track, tooFar, questStoreKey, readQuest, writeQuest, clearQuest, type Quest, type Reach, type Find } from '../src/quests.ts';
 import { dist } from '../src/fog.ts';
-import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND } from '../src/config.ts';
+import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND, QUEST_REVEAL_MS } from '../src/config.ts';
 import type { Place } from '../src/places.ts';
 
 const me = { lat: 1.3413, lng: 103.9638 };
@@ -53,12 +53,12 @@ assert.equal(goalOf(f0, me).label, 'Find 2 new places');
 assert.equal(goalOf(one, me).label, '1 of 2 new places');
 assert.equal(goalOf(two, me).label, 'Quest done');
 assert.deepEqual([goalOf(one, me).progress, goalOf(two, me).progress, goalOf(two, me).done], [0.5, 1, true]);
-assert(/^Reach the marked spot, \d+ m$/.test(goalOf(q0, me).label), 'metres, rounded to 10');
-assert.equal(goalOf(q0, me).label, 'Reach the marked spot, 200 m');
-assert.equal(goalOf({ ...q0, start: 1500, lat: me.lat + 1500 / 111195 }, me).label, 'Reach the marked spot, 1.5 km');
-assert.equal(goalOf({ ...q0, lat: me.lat + 3 / 111195 }, me).label, 'Reach the marked spot, 10 m', 'never "0 m" while the quest is open');
-assert.equal(goalOf({ ...q0, start: 1000, lat: me.lat + 997 / 111195 }, me).label, 'Reach the marked spot, 1.0 km', '997 m rounds up to a kilometre, not to "1000 m"');
-assert.equal(goalOf({ ...q0, start: 1000, lat: me.lat + 984 / 111195 }, me).label, 'Reach the marked spot, 980 m');
+assert(/^Find the hidden spot, \d+ m$/.test(goalOf(q0, me).label), 'metres, rounded to 10');
+assert.equal(goalOf(q0, me).label, 'Find the hidden spot, 200 m');
+assert.equal(goalOf({ ...q0, start: 1500, lat: me.lat + 1500 / 111195 }, me).label, 'Find the hidden spot, 1.5 km');
+assert.equal(goalOf({ ...q0, lat: me.lat + 3 / 111195 }, me).label, 'Find the hidden spot, 10 m', 'never "0 m" while the quest is open');
+assert.equal(goalOf({ ...q0, start: 1000, lat: me.lat + 997 / 111195 }, me).label, 'Find the hidden spot, 1.0 km', '997 m rounds up to a kilometre, not to "1000 m"');
+assert.equal(goalOf({ ...q0, start: 1000, lat: me.lat + 984 / 111195 }, me).label, 'Find the hidden spot, 980 m');
 const lone = { ...f0, need: 1 };
 assert.equal(goalOf(lone, me).label, 'Find 1 new place', 'singular for one');
 assert.equal(goalOf(lone, me).detail, 'Uncover 1 place you haven’t found yet, 1 to go');
@@ -68,10 +68,27 @@ assert(Math.abs(goalOf(q0, walkedHalf).progress - 0.5) < 0.01, 'halfway there, h
 assert.equal(goalOf(q0, { lat: me.lat - 500 / 111195, lng: me.lng }).progress, 0, 'walking away never goes below empty');
 assert.equal(goalOf(reached, me).label, 'Quest done');
 assert.equal(distanceTo(q0, null), q0.start, 'before the first fix, the start distance');
+assert.equal(goalOf({ ...q0, revealed: true }, me).label, 'Reach the marked spot, 200 m', 'once its spot is marked, the flag says so');
+assert.equal(goalOf(q0, me).detail, 'Follow the hint, about 200 m away');
+
+// a reach quest's spot starts hidden, and is marked once you need help
+const north = (m: number) => ({ lat: me.lat + m / 111195, lng: me.lng });
+assert.deepEqual([q0.revealed, q0.best, q0.t > 0], [false, q0.start, true], 'hidden at the start');
+assert.equal(track(q0, me, q0.t), q0, 'nothing changed: the same object');
+assert.equal(track(q0, me, q0.t + QUEST_REVEAL_MS).revealed, true, 'marked after a while of looking');
+assert.equal(track(q0, north(-300), q0.t).revealed, false, 'walking away from the start is not walking past it');
+const closer = track(q0, north(100), q0.t);
+assert.deepEqual([Math.round(closer.best), closer.revealed], [100, false], 'getting closer is remembered');
+assert.equal(track(closer, north(50), q0.t).revealed, false, 'drifting back a little is fine');
+assert.equal(track(closer, north(30), q0.t).revealed, true, 'drifting 60 m or more back out marks it (walked past, or lost the trail)');
+assert.equal(track({ ...closer, done: true }, north(40), q0.t).revealed, false, 'a done quest is left alone');
+assert.deepEqual([tooFar({ ...q0, start: 200 }, 300), tooFar({ ...q0, start: 200 }, 301), tooFar({ ...q0, start: 400 }, 600), tooFar({ ...q0, start: 400 }, 601)], [false, true, false, true], 'heading away: 1.5 times the start, and at least 100 m more');
 
 // damaged saved values are ignored
 const good: Quest[] = [q0, f0, two];
 for (const q of good) assert.deepEqual(parseQuest(JSON.parse(JSON.stringify(q))), q, 'a good value round trips');
+const { t: _t, best: _b, revealed: _r, ...older } = q0;
+assert.deepEqual(parseQuest(older), { ...older, t: 0, best: q0.start, revealed: true }, 'a quest saved before hints keeps its spot marked');
 for (const bad of [undefined, null, 'x', 5, [], {}, { kind: 'reach' }, { ...q0, seq: -1 }, { ...q0, seq: 1.5 }, { ...q0, done: 'no' }, { ...q0, lat: 'x' }, { ...q0, start: 0 }, { ...q0, key: 5 },
   { ...f0, need: 0 }, { ...f0, need: 999 }, { ...f0, ids: 'a' }, { ...f0, ids: [1] }, { ...f0, kind: 'sing' }])
   assert.equal(parseQuest(bad), null, `damaged value ${JSON.stringify(bad)} is ignored`);
