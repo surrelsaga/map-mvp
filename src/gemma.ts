@@ -13,6 +13,7 @@ let loads = 0;                                                         // counts
 let queue: Promise<unknown> = Promise.resolve();                       // one answer at a time: the model can't run two at once
 
 export const supported = () => !!gpu();
+export const isReady = () => !!ready;                                  // the model is loaded and can write
 
 // Loads the model (from the cache when it was downloaded before). `onProgress` gets 0-100 while files download.
 export function load(onProgress: (percent: number) => void): Promise<void> {

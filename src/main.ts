@@ -12,12 +12,14 @@ import * as sound from './sound.ts';
 import * as placesLayer from './placesLayer.ts';
 import * as today from './today.ts';
 import * as regions from './region.ts';
+import * as quests from './quests.ts';
+import * as gemma from './gemma.ts';
 import { getFlag, setFlag } from './flags.ts';
-import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, OPENED_KEY, QUEST_KEY, START_ZOOM } from './config.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, OPENED_KEY, GEMMA_KEY, GEMMA_MB, START_ZOOM } from './config.ts';
 import type { Fix } from './types.ts';
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
-for (const k of [QUEST_KEY, QUEST_KEY + ':debug']) storage.clearFog(k);   // a saved simple quest from before Phase 8: nothing reads it any more, and the AI quests must not inherit it
+const questsOn = new URLSearchParams(location.search).get('quests') !== 'off';   // ?quests=off: the plain map with only today's goal (the browser tests of the earlier phases use it)
 const storeKey = storage.storeKey(debug !== null);
 fogLayer.load(storage.readFog(storeKey));            // bring back earlier progress before the first fix
 const saver = storage.createSaver(storeKey, fogLayer.snapshot);
@@ -27,11 +29,32 @@ hud.init({
   onFocus: (place) => { if (placesLayer.focusPlace(place)) me.stopFollowing(); },   // "Last: ..." in the stats card: show that place on the map, and stay there (not snap back to you on the next fix)
   hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
   openedSeen: getFlag(OPENED_KEY), onOpened: () => setFlag(OPENED_KEY),
+  onGemma: switchGemma,
 });
 const regionKey = regions.regionStoreKey(debug !== null);
 const placesApi = ((import.meta.env.VITE_PLACES_API as string | undefined) ?? '').replace(/\/+$/, '');   // the Render service; unset = only SUTD and the stored regions
-const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null));   // starts loading right away; places already in restored fog appear quietly
+const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
 if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
+
+// Gemma writes the quest lines, only once switched on (a big download). After that it loads from the browser's cache on every visit.
+function switchGemma(on: boolean) {
+  setFlag(GEMMA_KEY, on);
+  if (!on) { gemma.unload(); hud.showGemma(false, `${GEMMA_MB} MB download, runs on this phone`); return; }
+  hud.showGemma(true, 'Loading…');
+  gemma.load((percent) => hud.showGemma(true, `Downloading ${percent}%`)).then(
+    () => { hud.showGemma(true, 'Runs on this phone, offline'); discovery.onWriterReady(); },
+    (e) => {
+      if (!getFlag(GEMMA_KEY)) return;                                 // switched off while it loaded: nothing went wrong
+      console.warn('Gemma could not load:', e);
+      setFlag(GEMMA_KEY, false);
+      hud.showGemma(false, 'Could not load. Tap to try again');
+    },
+  );
+}
+if (questsOn) {
+  if (!gemma.supported()) hud.showGemma(false, 'Needs WebGPU, which this browser lacks', false);
+  else switchGemma(getFlag(GEMMA_KEY));
+}
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 
@@ -57,7 +80,7 @@ if (debug === null) {
   me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
-  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
+  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 
@@ -67,6 +90,7 @@ interface FogMapApi {
   isRevealed: typeof fogLayer.isRevealed;
   snapshot: typeof fogLayer.snapshot;
   load: typeof fogLayer.load;
+  quest: typeof discovery.activeQuest;
 }
 declare global { interface Window { fogMap: FogMapApi } }
-window.fogMap = { map, where: me.where, isRevealed: fogLayer.isRevealed, snapshot: fogLayer.snapshot, load: fogLayer.load };   // handle for the browser tests (not a security boundary: all of this runs on the user's own device)
+window.fogMap = { map, where: me.where, isRevealed: fogLayer.isRevealed, snapshot: fogLayer.snapshot, load: fogLayer.load, quest: discovery.activeQuest };   // handle for the browser tests (not a security boundary: all of this runs on the user's own device)

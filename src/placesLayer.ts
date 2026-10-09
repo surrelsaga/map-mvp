@@ -1,8 +1,9 @@
-// Discovered places on the map: a tappable gold pin per place, shown only once its spot has been cleared.
+// Discovered places on the map: a tappable gold pin per place, shown only once its spot has been cleared (and not hidden in a crowd of pins).
 import L from 'leaflet';
 import { map, calm } from './map.ts';
 import { groupOf, typeLabel, type Group, type Place } from './places.ts';
 import { ICONS, discHtml } from './icons.ts';
+import { CROWD_PX } from './config.ts';
 
 // The icon box is 28 px (a finger-sized tap target); the gold disc inside it is drawn by CSS.
 const icons = Object.fromEntries((Object.keys(ICONS) as Group[]).map((g) => [g, L.divIcon({ className: `place-pin ${g}`, iconSize: [28, 28], html: discHtml(g) })])) as Record<Group, L.DivIcon>;
@@ -25,7 +26,29 @@ export function addPlace(p: Place, fresh = false) {
     el.classList.add('is-new');
     el.addEventListener('animationend', () => el.classList.remove('is-new'), { once: true });
   }
+  queueDeclutter();
 }
+
+// Pins that would sit on top of each other (closer than CROWD_PX on screen) are a crowd: only the newest find in each shows, so the map
+// stays readable. Zooming in spreads them out and brings the rest back. Screen distances only change with zoom, not with panning.
+// ponytail: compares every pin with every kept pin (hundreds of places: instant); a grid bucket if a region's finds grow into the thousands
+function declutter() {
+  const kept: L.Point[] = [];
+  for (const m of [...markers.values()].reverse()) {
+    const at = map.latLngToLayerPoint(m.getLatLng());
+    const crowded = kept.some((k) => k.distanceTo(at) < CROWD_PX);
+    if (!crowded) kept.push(at);
+    const el = m.getElement();
+    if (el) el.style.display = crowded ? 'none' : '';
+  }
+}
+let queued = false;
+function queueDeclutter() {                                              // once per batch of finds (a reload adds dozens at once), not once per pin
+  if (queued) return;
+  queued = true;
+  queueMicrotask(() => { queued = false; declutter(); });
+}
+map.on('zoomend', declutter);
 
 // Takes every pin off the map (the region changed: its places are not the ones on screen any more).
 export function clear() {

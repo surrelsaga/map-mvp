@@ -8,9 +8,13 @@ import * as hud from './hud.ts';
 import * as fog from './fog.ts';
 import * as sound from './sound.ts';
 import * as today from './today.ts';
+import * as quests from './quests.ts';
+import * as questLayer from './questLayer.ts';
+import * as questText from './questText.ts';
+import * as gemma from './gemma.ts';
 import { toast } from './ui.ts';
 import * as regions from './region.ts';
-import { AREA_RADIUS, PLACES_RETRY_MS, PLACES_TIMEOUT_MS, REANCHOR_M, REGION_RETRY_MS } from './config.ts';
+import { AREA_RADIUS, PLACES_RETRY_MS, PLACES_TIMEOUT_MS, QUEST_NEXT_MS, REANCHOR_M, REGION_RETRY_MS, HERE_M, GEMMA_TRIES } from './config.ts';
 import type { Fix } from './types.ts';
 
 let placeList: places.Place[] = [];                  // the places of the current region
@@ -33,6 +37,12 @@ const tuning = (): { timeoutMs?: number; retryMs?: number } => (import.meta.env.
 const retryMs = () => tuning().retryMs ?? REGION_RETRY_MS;
 let todayKey = '', todayState: today.Today = { date: '', ids: [] };
 let pos: Fix | null = null;                          // where you are, from the latest accurate fix
+// Quests (Phase 9). A quest outlives a region change: its target is a point, and the places list is only needed to write about it.
+let quest: quests.Quest | null = null;              // the active quest (a finished one stays here for QUEST_NEXT_MS, so its card can say "Found it")
+let questKey = '', lastSeq = -1;                    // where it is saved ('' = quests are off), and the number of the latest quest (the next one is lastSeq + 1)
+let shownLabel = '', shownSeq = -1;                 // what the quest pill says now, and which quest has had its card opened
+let writing = -1;                                   // the quest Gemma is writing a line for (-1: none)
+let warned = false;                                 // the "heading away" alert has been given (again once you come back within the start distance)
 
 // The places found today, on the phone's local date: what this tab remembers plus whatever is stored (another tab may have counted too).
 // Counting which places, not how many, means the same place never counts twice, however many tabs find it. Asking also rolls over at midnight.
@@ -43,6 +53,99 @@ const countToday = (add: string[] = []) => {
 };
 const dailyGoal = () => today.goalOf(countToday().ids.length);
 function showGoal() { hud.showGoal(dailyGoal()); }
+
+const buzz = (ms: number) => { if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(ms); };   // browsers ignore (and warn about) vibration before the first tap; iPhones have none
+
+// What Gemma (or the plain line) is told about a quest. Where you are counts only if you just found a place right here.
+function factsFor(q: quests.Quest): questText.Facts {
+  const here = last && pos && fog.dist(pos, last) <= HERE_M ? last.name : null;
+  if (q.kind === 'find') {
+    const open = placeList.filter((_, i) => !found.has(i)).map((p) => ({ p, d: pos ? fog.dist(pos, p) : 0 })).sort((a, b) => a.d - b.d);
+    return { here, kind: 'find', need: q.need, kinds: [...new Set(open.slice(0, 12).map(({ p }) => places.typeLabel(p.type).toLowerCase()))].slice(0, 3) };   // the kinds of place nearest you, so Gemma has something real to name
+  }
+  const target = placeList.find((p) => places.placeKey(p) === q.key);
+  return { here, kind: 'reach', what: places.typeLabel(target?.type ?? 'place').toLowerCase(), dir: questText.compass(pos ?? q, q), hidden: target?.name ?? '' };
+}
+
+// The quest pill (top right) and its card. A finished reach quest says what the hint was pointing at, so the walker sees the riddle resolve.
+function showQuest(reveal = false) {
+  if (!quest) { shownSeq = -1; hud.showQuest(null); return; }
+  const goal = quests.goalOf(quest, pos);
+  shownLabel = goal.label;
+  const hint = quest.text ?? questText.template(factsFor(quest));
+  const name = quest.kind === 'reach' && quest.done ? placeList.find((p) => places.placeKey(p) === (quest as quests.Reach).key)?.name : undefined;   // what the hint was pointing at
+  const short = quest.done ? 'Done' : quest.kind === 'reach' ? quests.label(quests.distanceTo(quest, pos)) : `${quest.ids.length}/${quest.need}`;
+  // A new quest opens its card once: right away, or (when Gemma is about to write the line) when the line is ready, so the hint doesn't change under the reader's eyes.
+  const open = reveal || (quest.seq !== shownSeq && (quest.text !== undefined || !gemma.isReady()));
+  hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : hint, detail: name ? hint : goal.detail, byGemma: !!quest.text && !name }, open);
+  if (open) shownSeq = quest.seq;
+}
+
+// Asks Gemma for the quest's line, if it is loaded and the quest has none yet. Until it answers (or if GEMMA_TRIES answers all fail the checks) the plain line shows.
+function writeLine(q: quests.Quest) {
+  if (q.text || q.done || writing === q.seq) return;
+  writing = q.seq;
+  const f = factsFor(q);
+  (async () => {
+    for (let i = 0; i < GEMMA_TRIES && quest?.seq === q.seq; i++) {
+      const raw = await gemma.write(questText.prompt(f));
+      if (raw === null) return;                                         // not loaded (yet): onWriterReady asks again
+      const text = questText.clean(raw, f);
+      if (text) { if (quest?.seq === q.seq && !quest.text) setQuest({ ...quest, text }); return; }
+      console.debug('Gemma line rejected:', raw);                       // to tune the checks (questText.clean) against real answers
+    }
+    if (quest?.seq === q.seq) showQuest(true);                          // every try failed the checks: show the plain line now
+  })().catch((e) => { console.warn('Gemma could not write the quest:', e); if (quest?.seq === q.seq) showQuest(true); }).finally(() => { if (writing === q.seq) writing = -1; });
+}
+
+// The active quest changed: save it, mark its spot on the map (a reach quest that isn't done, once revealed), show its pill, and get Gemma writing its line.
+// Only a quest is written down: a dropped or finished one is simply replaced by the next, and `lastSeq` keeps the numbering going.
+function setQuest(q: quests.Quest | null) {
+  quest = q;
+  if (q) { lastSeq = q.seq; quests.writeQuest(questKey, q); writeLine(q); }
+  if (q?.kind === 'reach' && !q.done && q.revealed) questLayer.show(q, () => (quest ? quests.goalOf(quest, pos).label : ''));
+  else questLayer.clear();
+  showQuest();
+}
+
+// Call once Gemma has loaded: the quest already on screen gets its line.
+export const onWriterReady = () => { if (quest) writeLine(quest); };
+
+// Starts the next quest once there is a position and a list of places to pick from. Does nothing while a quest (even a finished one) is on screen.
+function ensureQuest() {
+  if (!questKey || quest || !pos || !placeList.length) return;
+  const q = quests.makeQuest(lastSeq + 1, placeList, found, pos) ?? quests.makeQuest(lastSeq + 2, placeList, found, pos);   // no reach target to be had (all places are right here): a find quest instead of none
+  if (q) { warned = false; setQuest(q); }
+}
+
+// A reach quest is only meaningful while its place exists. At start-up the saved quest comes back (a finished one, a reach quest whose place isn't in the list, or damaged data just means a fresh quest);
+// after a region change, a reach quest whose place is not in the new list is dropped and the next quest is made from the new list.
+const targetKnown = (q: quests.Quest) => q.kind === 'find' || placeList.some((p) => places.placeKey(p) === (q as quests.Reach).key);
+function settleQuest() {
+  if (!questKey) return;
+  if (!quest) {
+    const saved = quests.readQuest(questKey);
+    if (!saved) return;
+    lastSeq = saved.seq;
+    if (!saved.done && targetKnown(saved)) { setQuest(saved); trackQuest(); }
+  } else if (!quest.done && !targetKnown(quest)) setQuest(null);
+}
+
+// A reach quest follows you: its spot is marked once you need help (with a message), you're told when you head the wrong way, and the pill's distance updates.
+function trackQuest() {
+  if (quest?.kind !== 'reach' || quest.done) return;
+  const next = quests.track(quest, pos, Date.now());
+  if (next !== quest) {
+    if (next.revealed && !quest.revealed) toast('The quest spot is on the map', 'Follow the flag');
+    setQuest(next);
+  }
+  if (pos) {
+    const d = fog.dist(pos, next);
+    if (!warned && quests.tooFar(next, d)) { warned = true; toast('You’re heading away from the quest', `It’s about ${quests.label(d)} ${questText.compass(pos, next)}`); buzz(200); }
+    else if (d <= next.start) warned = false;
+  }
+  if (quest && quests.goalOf(quest, pos).label !== shownLabel) showQuest();   // the label is rounded to 10 m, so the pill changes only when it says something new
+}
 
 function refresh() {
   const fraction = area ? fogLayer.countIn(area) / area.size : 0;       // ponytail: counts all cleared cells (~1x/s); keep a running count if that shows in a profile
@@ -65,16 +168,23 @@ function check() {
   if (news.length || changed) { news.forEach((p) => everFound.add(places.placeKey(p))); today.writeFound(foundKey, everFound); }
   const loud = new Set(news);
   fresh.forEach((p) => placesLayer.addPlace(p, loud.has(p)));          // announced finds also get the gold pulse
+  let questDone = false;
+  if (quest) {                                                          // every find goes to the quest: a quiet one can still complete a reach quest
+    const next = quests.progress(quest, fresh, news);
+    if (next !== quest) { questDone = next.done; setQuest(next); }
+  }
   if (news.length) {
     last = news[news.length - 1];
     const dailyWas = dailyGoal().done;
     countToday(news.map(places.placeKey));
-    const detail = !dailyWas && dailyGoal().done ? 'Today’s goal done' : hud.nudge(firstEver) || (news.length === 1 ? places.typeLabel(news[0].type) : '');   // the first find ever also points at the button
+    const detail = questDone ? 'Quest done' : !dailyWas && dailyGoal().done ? 'Today’s goal done' : hud.nudge(firstEver) || (news.length === 1 ? places.typeLabel(news[0].type) : '');   // the first find ever also points at the button
     toast(places.foundMessage(news), detail);
     hud.dismissHint();                                                  // a first find shows the hint was no longer needed
     sound.chime();                                                      // silent until the first tap, and when muted
-    if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(60);   // browsers ignore (and warn about) vibration before the first tap; iPhones have none
+    buzz(60);
   }
+  const finished = quest;
+  if (questDone) setTimeout(() => { if (quest === finished) { setQuest(null); ensureQuest(); refresh(); } }, QUEST_NEXT_MS);   // the pill says "Done" for a moment, then the next quest starts
   refresh();
 }
 
@@ -85,7 +195,12 @@ export const onCleared = check;
 export function onMove(fix: Fix) {
   pos = fix;
   decide(fix);                                                          // a new region first, so what is shown is never from places you have left behind
+  if (!quest) ensureQuest();
+  else trackQuest();
 }
+
+// For the browser tests: the quest on screen right now (a copy).
+export const activeQuest = () => quest && { ...quest };
 
 // A network or server error is retried a couple of times (phones walk through bad signal); a missing file (4xx) is final.
 // `service`: a request to the places service. It gets a time limit, and a 5xx or a timeout is not retried: the service has already tried three Overpass servers,
@@ -110,6 +225,7 @@ async function loadFile(url: string, service = false): Promise<unknown> {
 function clearRegion() {
   current = null; placeList = []; found.clear(); last = null; area = null;
   placesLayer.clear();
+  if (quest?.kind === 'reach' && !quest.done && pos && fog.dist(pos, quest) > AREA_RADIUS) setQuest(null);   // its place is out of reach now; a nearer one stays through the wait for the next region
   refresh();
 }
 
@@ -126,7 +242,9 @@ function setRegion(r: regions.Region, store: boolean) {
   placesLayer.clear();
   setTimeout(() => { if (current === r) { area = coverage.circleCells(r.center, AREA_RADIUS); refresh(); } }, 0);
   if (leaving) toast('New area', r.places.length ? `${r.places.length} places within 2 km` : 'No places within 2 km');   // before the check, so a find's message wins
+  settleQuest();                                                        // before the check, so a quest's own place found in restored fog still counts
   check();
+  ensureQuest();
 }
 
 // One load at a time. A failure is remembered, so a missing file or a dead server is not asked again on every step.
@@ -174,15 +292,16 @@ function askAgainIfEmpty() {
 
 // Brings back the last region at once (no GPS wait, no network), or reads the shipped SUTD file when nothing is stored. No file just means nothing to discover.
 // Places this device found before show up quietly; anything else under cleared fog is a new find, even if the region arrives late.
-export function start(seed: string, api: string, regionStoreKey: string, todayStoreKey: string, foundStoreKey: string) {   // returns the centre of the region it opened with, if any
+export function start(seed: string, api: string, regionStoreKey: string, todayStoreKey: string, foundStoreKey: string, questStoreKey: string | null) {   // questStoreKey null: quests are off. Returns the centre of the region it opened with, if any
   seedUrl = seed; placesApi = api; regionKey = regionStoreKey; foundKey = foundStoreKey;
   todayKey = todayStoreKey;
+  questKey = questStoreKey ?? '';
   todayState = today.countToday(new Date(), [], today.readToday(todayKey));   // today's finds from earlier in the day, if the app was closed and reopened
   refresh();
   // An app left open overnight must start the new day: look again when it comes back to the foreground, and once a minute.
   const newDay = showGoal;                                             // only the goal: no need to recount the whole map for this
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') newDay(); });
-  setInterval(newDay, 60_000);
+  setInterval(() => { newDay(); trackQuest(); }, 60_000);              // the quest too: its spot is marked after a while, even if you stand still
   for (const id of today.readFound(foundKey)) everFound.add(id);
   if (!today.hasFound(foundKey)) {                                     // first run of this version on this device (an empty list is written, so this happens once)
     const saved = fogLayer.snapshot();
