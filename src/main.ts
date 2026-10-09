@@ -37,17 +37,18 @@ const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi
 if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
 
 // Gemma writes the quest lines, only once switched on (a big download). After that it loads from the browser's cache on every visit.
+let attempt = 0;                                                      // which switch-on is current: an older load that fails after a quick off and on again says nothing
 function switchGemma(on: boolean) {
+  const mine = ++attempt;
   setFlag(GEMMA_KEY, on);
   if (!on) { gemma.unload(); hud.showGemma(false, `${GEMMA_MB} MB download, runs on this phone`); return; }
   hud.showGemma(true, 'Loading…');
   gemma.load((percent) => hud.showGemma(true, `Downloading ${percent}%`)).then(
     () => { hud.showGemma(true, 'Runs on this phone, offline'); discovery.onWriterReady(); },
     (e) => {
-      if (!getFlag(GEMMA_KEY)) return;                                 // switched off while it loaded: nothing went wrong
+      if (mine !== attempt) return;                                    // switched off (or on again) while it loaded: nothing went wrong
       console.warn('Gemma could not load:', e);
-      setFlag(GEMMA_KEY, false);
-      hud.showGemma(false, 'Could not load. Tap to try again');
+      hud.showGemma(false, 'Could not load. Tap to try again');         // the opt-in stays: offline on a train says nothing about next time, and a retry loads from the cache
     },
   );
 }

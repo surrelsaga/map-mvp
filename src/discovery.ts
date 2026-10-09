@@ -72,7 +72,8 @@ function showQuest(reveal = false) {
   if (!quest) { shownSeq = -1; hud.showQuest(null); return; }   // (shownDone stays: a quest is never numbered twice)
   const goal = quests.goalOf(quest, pos);
   shownLabel = goal.label;
-  const hint = quest.text ?? questText.template(factsFor(quest));
+  const facts = factsFor(quest);
+  const hint = quest.text ?? (!pos && quest.kind === 'reach' ? 'Finding you, to point the way.' : questText.template(quest.done ? { ...facts, here: null } : facts));   // no position yet: a direction would be a guess   // under "Found it" the hint is the one you followed, not "From <the place you just found>"
   const name = quest.kind === 'reach' && quest.done ? placeList.find((p) => places.placeKey(p) === (quest as quests.Reach).key)?.name : undefined;   // what the hint was pointing at
   const short = quest.done ? 'Done' : quest.kind === 'reach' ? quests.label(quests.distanceTo(quest, pos)) : `${quest.ids.length}/${quest.need}`;
   // A new quest opens its card once: right away, or (when Gemma is about to write the line) when the line is ready, so the hint doesn't change under the reader's eyes.
@@ -85,15 +86,15 @@ function showQuest(reveal = false) {
 
 // Asks Gemma for the quest's line, if it is loaded and the quest has none yet. Until it answers (or if GEMMA_TRIES answers all fail the checks) the plain line shows.
 function writeLine(q: quests.Quest) {
-  if (q.text || q.done || writing === q.seq) return;
+  if (q.text || q.done || writing === q.seq || !pos) return;           // no position yet: the direction would be a guess
   writing = q.seq;
   const f = factsFor(q);
   (async () => {
     for (let i = 0; i < GEMMA_TRIES && quest?.seq === q.seq; i++) {
       const raw = await gemma.write(questText.prompt(f));
-      if (raw === null) return;                                         // not loaded (yet): onWriterReady asks again
+      if (raw === null) { if (quest?.seq === q.seq) showQuest(); return; }   // not loaded (yet, or unloaded meanwhile): onWriterReady asks again, and the plain line may open the card now
       const text = questText.clean(raw, f);
-      if (text) { if (quest?.seq === q.seq && !quest.text) setQuest({ ...quest, text }); return; }
+      if (text) { if (quest?.seq === q.seq && !quest.text && !quest.done) setQuest({ ...quest, text }); return; }   // a quest finished while Gemma wrote keeps its object: the next-quest timer compares it
       console.debug('Gemma line rejected:', raw);                       // to tune the checks (questText.clean) against real answers
     }
     if (quest?.seq === q.seq) showQuest(true);                          // every try failed the checks: show the plain line now
@@ -186,7 +187,7 @@ function check() {
     buzz(60);
   }
   const finished = quest;
-  if (questDone) setTimeout(() => { if (quest === finished) { setQuest(null); ensureQuest(); refresh(); } }, QUEST_NEXT_MS);   // the pill says "Done" for a moment, then the next quest starts
+  if (questDone) setTimeout(() => { if (quest?.seq === finished?.seq) { setQuest(null); ensureQuest(); refresh(); } }, QUEST_NEXT_MS);   // the pill says "Done" for a moment, then the next quest starts
   refresh();
 }
 
@@ -195,10 +196,14 @@ export const onCleared = check;
 
 // Call with every accurate fix, before the fog is cleared.
 export function onMove(fix: Fix) {
+  const first = !pos;
   pos = fix;
   decide(fix);                                                          // a new region first, so what is shown is never from places you have left behind
   if (!quest) ensureQuest();
-  else trackQuest();
+  else {
+    trackQuest();
+    if (first) { writeLine(quest); showQuest(); }                       // a quest restored before the first fix had no direction to speak of: word it now
+  }
 }
 
 // For the browser tests: the quest on screen right now (a copy).

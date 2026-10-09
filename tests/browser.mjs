@@ -1581,6 +1581,16 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   assert.equal(await none.evaluate(() => document.getElementById('questGemma').hidden), true, 'no WebGPU: no offer');
   await none.close(); t('Gemma offer in the card ok');
 }
+{ // a quest restored before the first fix does not claim a direction: once you are placed, its line says the real one (south here)
+  const lat = S0.lat - dN(250), lng = S0.lng;
+  const places = [{ name: 'Spot S', type: 'cafe', lat, lng }];
+  const reach = { kind: 'reach', seq: 0, done: false, key: `Spot S|${lat}|${lng}`, lat, lng, start: 250, t: Date.now(), best: 250, revealed: false };
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); await p.evaluateOnNewDocument((r) => localStorage.setItem('fogwalk:quest', JSON.stringify(r)), reach); }, QUEST); await sleep(800);
+  assert.doesNotMatch((await card(p))?.line ?? '', /north/, 'before the first fix it does not say north');
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 }); await sleep(500);
+  assert.match((await card(p))?.line ?? '', /south/, 'after the first fix it says south: ' + JSON.stringify(await card(p)));
+  await p.close(); t('restored quest words its direction after the first fix ok');
+}
 { // a narrow phone: the Today button and the quest pill share the top row without touching, with a long distance
   const places = [{ name: 'Far Spot', type: 'cafe', lat: S0.lat + dN(390), lng: S0.lng }];
   const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
