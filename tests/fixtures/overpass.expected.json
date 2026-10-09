@@ -1,0 +1,58 @@
+[
+  {
+    "id": "node/3",
+    "name": "7-Eleven",
+    "type": "convenience",
+    "lat": 1.35,
+    "lng": 103.97
+  },
+  {
+    "id": "node/10",
+    "name": "Alpha Cafe",
+    "type": "cafe",
+    "lat": 1.338,
+    "lng": 103.96
+  },
+  {
+    "id": "way/5",
+    "name": "Big Park",
+    "type": "park",
+    "lat": 1.345,
+    "lng": 103.96
+  },
+  {
+    "id": "node/12",
+    "name": "Padded",
+    "type": "pub",
+    "lat": 1.344,
+    "lng": 103.968
+  },
+  {
+    "id": "node/8",
+    "name": "Pavilion",
+    "type": "attraction",
+    "lat": 1.339,
+    "lng": 103.962
+  },
+  {
+    "id": "node/13",
+    "name": "Same Name",
+    "type": "cafe",
+    "lat": 1.3441,
+    "lng": 103.969
+  },
+  {
+    "id": "node/14",
+    "name": "Same Name",
+    "type": "cafe",
+    "lat": 1.356,
+    "lng": 103.97
+  },
+  {
+    "id": "node/1",
+    "name": "Zeta Cafe",
+    "type": "cafe",
+    "lat": 1.342,
+    "lng": 103.964
+  }
+]

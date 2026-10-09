@@ -316,7 +316,7 @@ console.log('Phase 3: saved progress');
   await a.evaluate(() => dispatchEvent(new Event('pagehide')));
   await b.evaluate(() => window.__fix({ coords: { latitude: 1.37, longitude: 103.99, accuracy: 20 } }));
   await b.evaluate(() => dispatchEvent(new Event('pagehide')));
-  const merged = JSON.parse(await ls(a, REAL)).keys;
+  const merged = JSON.parse(await ls(b, REAL)).keys;                // read from the tab that wrote last: another tab's localStorage view lags by a moment in Chrome, so tab a can still show its own 44
   const [na, nb] = [await count(a), await count(b)];
   assert(merged.length >= na + nb - 2, `the later tab's save kept the other tab's cells (${merged.length} stored, ${na} + ${nb} in memory)`);
   await ctx.close(); t('two tabs merge ok');
@@ -1145,6 +1145,102 @@ let q;
   assert.equal(await p.evaluate(() => document.getElementById('chipText').textContent), 'Find 3 places today');
   assert.equal(await p.evaluate(() => localStorage.getItem('fogwalk:quest:debug')), null, 'and nothing is saved for quests');
   await p.close(); t('quests off ok');
+}
+
+console.log('Phase 7: regions');
+{ // the places service is faked: every /places request is recorded, and answered from `answer(url)` (a region, or a status number for a failure, or 'abort')
+  const TOKYO = { lat: 35.675, lng: 139.65 };                    // the region centre that a fix at 35.6762, 139.6503 rounds to
+  const region = (c, names, extra = 0) => ({ source: 'OpenStreetMap contributors (ODbL)', fetched: '2026-10-09', center: c, radius: 2000,
+    places: names.map((name, i) => ({ id: `node/${i + 1 + extra}`, name, type: 'cafe', lat: c.lat + dN(20 + i * 300), lng: c.lng })) });
+  const service = (answer, calls) => async (p) => {
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().includes('/places?')) return r.continue();
+      calls.push(r.url());
+      const a = answer(new URL(r.url()));
+      if (a === 'abort') return r.abort().catch(() => {});
+      if (typeof a === 'number') return r.respond({ status: a, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"error":"x"}' }).catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(a) }).catch(() => {});
+    });
+  };
+  const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 25 });
+  const total = (p) => stats(p).then((s) => s.places);
+  const REGIONS = 'fogwalk:regions:v1';
+  const q = (u) => ({ lat: Number(u.searchParams.get('lat')), lng: Number(u.searchParams.get('lng')) });
+
+  // first open in Tokyo: one request, with a rounded centre; places from the service; the map goes there; no "New area" for the first region
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const aCalls = [];
+  let p = await open('', async (p) => { await service(() => region(TOKYO, ['Shibuya Cafe', 'Far Cafe']), aCalls)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'the places of the new region: ' + await total(p));
+  assert.equal(aCalls.length, 1, 'one request');
+  assert.deepEqual(q(new URL(aCalls[0])), TOKYO, 'and it carries the rounded centre');
+  assert(!aCalls.join().includes('35.6762') && !aCalls.join().includes('139.6503'), 'never the precise position');
+  assert(Math.abs((await centre(p)).lat - 35.676) < 0.01, 'the map is in Tokyo');
+  assert(!(await toasts(p)).includes('New area'), 'no message for the first region');
+  assert.equal(JSON.parse(await ls(p, REGIONS)).regions.length, 1, 'and the region is kept on the phone');
+  assert((await count(p)) > 0, 'the fog clears there');
+  const cleared = await count(p);
+  await p.close(); t('first open: one rounded request, places, map, kept ok');
+
+  // reload with the service blocked: the kept region is enough (no network), and the map opens there
+  const bCalls = [];
+  p = await open('', async (p) => { await service(() => 'abort', bCalls)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'the same places with no network: ' + await total(p));
+  assert.equal(bCalls.length, 0, 'no request');
+  assert.equal((await count(p)), cleared, 'and the fog came back');
+
+  // walk 1.6 km out: a new region around you, the old fog stays, a message says so
+  const NEW = { lat: 35.69, lng: 139.65 };                        // 1.6 km north of the first centre, already on the grid
+  const moved = [];
+  await p.close();
+  p = await open('', async (p) => { await service(() => region(NEW, ['Uptown Bar'], 10), moved)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'));
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'the places of the new region: ' + await total(p));
+  assert.equal(moved.length, 1, 'one request');
+  assert.deepEqual(q(new URL(moved[0])), NEW, 'for the rounded spot you are at');
+  assert((await toasts(p)).includes('New area'), 'with a message: ' + (await toasts(p)).join('|'));
+  assert((await count(p)) >= cleared, 'the earlier fog is still there');
+  assert.deepEqual(JSON.parse(await ls(p, REGIONS)).regions.map((r) => r.center), [NEW, TOKYO], 'both regions are kept, newest first');
+
+  // and back: the first region again, from the phone, no request
+  moved.length = 0;
+  await fixAt(p, 35.6762, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'back in the first region: ' + await total(p));
+  assert.equal(moved.length, 0, 'no request: it was kept');
+  await p.close(); t('reload offline, walk out, new region, walk back ok');
+
+  // a failure while walking out does not stop you coming back into a region that is stored
+  const flaky = [];
+  p = await open('', async (p) => { await service(() => 502, flaky)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => /places found$/.test(await total(p))), 'the stored region opens: ' + await total(p));
+  await fixAt(p, 35.7100, 139.6500);                              // 3.9 km out: no stored region covers it, so the service is asked (and fails)
+  assert(await waitFor(async () => flaky.length === 1), 'asked once');
+  await fixAt(p, 35.6762, 139.6503);
+  assert(await waitFor(async () => /^0 of \d places found$/.test(await total(p)), 3000), 'back in a stored region at once, not after the retry wait: ' + await total(p));
+  assert.equal(flaky.length, 1, 'with no new request');
+  await p.close(); t('a failed load never blocks a stored region ok');
+
+  // the service fails: the fog still clears, the card says why, nothing is kept, and it is not asked again at once
+  const fail = [];
+  const lost = await browser.createBrowserContext(); await lost.overridePermissions(ORIGIN, ['geolocation']);
+  p = await open('', async (p) => { await service(() => 502, fail)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: lost });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'), 'says why: ' + await total(p));
+  assert((await count(p)) > 0, 'the fog clears all the same');
+  assert.equal(await ls(p, REGIONS), null, 'a failure is not kept');
+  assert.equal(fail.length, 1, 'asked once: the service already tried three Overpass servers, so a 5xx is not asked again at once');
+  await fixAt(p, 35.6764, 139.6503); await sleep(1500);
+  assert.equal(fail.length, 1, 'and not asked again on the next step either');
+  await p.close(); t('failed load: says so, keeps nothing, waits before asking again ok');
+
+  // near SUTD the shipped file is used and the service is never asked
+  const home = [];
+  p = await open('', async (p) => { await service(() => 500, home)(p); await fixAt(p, 1.35, 103.97); });
+  assert(await waitFor(async () => /^0 of \d{3} places found$/.test(await total(p))), 'the SUTD places: ' + await total(p));
+  assert.equal(home.length, 0, 'no request near SUTD');
+  assert.equal(await ls(p, REGIONS), null, 'and the shipped file is not stored');
+  await p.close(); t('near SUTD: no request ok');
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));

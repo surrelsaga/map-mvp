@@ -22,8 +22,14 @@ export const SAVE_DELAY_MS = 2000;        // newly cleared cells are written to 
 export const STORE_KEY = 'fogwalk:v1';    // bump the version when the stored format or the grid (fog.key) changes; storage.ts adds CELL, and ':debug' in debug mode
 
 // Places
-export const AREA_RADIUS = 2000;          // metres around SUTD: the neighbourhood that "% explored" is measured against (same as tools/fetch-places.mjs)
+export const AREA_RADIUS = 2000;          // metres: the radius of every region (what server/places.ts asks Overpass for, and what "% explored" is measured against); tools/fetch-places.mjs uses it for SUTD
 export const TOAST_MS = 4000;             // how long a "Found: ..." message stays up
+export const REGION_ROUND = 0.005;        // degrees (~550 m): a region's centre is the fix rounded to this grid. It is also all the server is ever told about where you are
+export const REANCHOR_M = 1500;           // walk further than this from the region's centre and a new region is loaded around you (the loaded circle is AREA_RADIUS, so 500 m of places always lie ahead)
+export const REGION_KEEP = 3;             // regions kept on the phone, most recent first
+export const REGION_RETRY_MS = 60_000;    // after a failed load, wait this long before asking again
+export const REGION_MAX_CHARS = 2_000_000;   // stored regions never take more than this of localStorage's ~5 MB, so the fog (fogwalk:v1) always has room (a dense city centre is ~0.8 MB)
+export const REGION_KEY = 'fogwalk:regions:v1';   // the kept regions; debug mode adds ':debug'
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
 
 // Look and feel

@@ -3,7 +3,7 @@
 ## Context
 `map-MVP/` is empty apart from CLAUDE.md. Before building the full product, the goal is to see whether the map has potential: a live GPS dot walking through fog that clears behind it, with real places around SUTD appearing as they're uncovered. It's built in small phases, and each one works and has been checked on a real phone before the next starts.
 
-Decisions so far: web app built with Vite + TypeScript (moved from a no-build setup in Phase 2.5). Leaflet (npm) with OSM tiles. Fog as grid cells drawn on a canvas. `localStorage` for saved progress. The dot follows live GPS. Place data is fetched once ahead of time for a **2 km radius around SUTD** (≈1.3413, 103.9638) and shipped as a static file, so no location ever leaves the phone. Hosting is GitHub Pages, with $50 of Render credit kept as a fallback if a server is ever needed.
+Decisions so far: web app built with Vite + TypeScript (moved from a no-build setup in Phase 2.5). Leaflet (npm) with OSM tiles. Fog as grid cells drawn on a canvas. `localStorage` for saved progress. The dot follows live GPS. Place data was first fetched once ahead of time for a **2 km radius around SUTD** (≈1.3413, 103.9638) and shipped as a static file, so no location ever left the phone. **Phase 7 changes this:** places come in 2 km regions centred on the user, which move to them when they walk out (see Phase 7). They're fetched through a small Render web service and kept on the phone, so anyone can try the app in their own area. The SUTD file stays as the offline seed and the test data. Hosting: Render is the main deploy (static site for the app, plus that one web service, paid from $50 of credit). The Pages workflow on `main` still exists.
 
 ## Architecture
 TypeScript ES modules bundled by Vite. Each module has one job. `src/main.ts` is the only file that knows all the others; adding a feature means writing a module and adding one line of wiring there.
@@ -35,10 +35,13 @@ src/
   sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
   quests.ts         PURE + store: the two test quests (reach, find), next-quest pick, progress, the quest's goal   ✅ phase 6
   questLayer.ts     the quest marker (Leaflet divIcon in the `quest` pane)   ✅ phase 6
+  overpass.ts       PURE: the Overpass query for a centre, and its answer turned into `Place[]` (moved out of tools/fetch-places.mjs; the tool and the server import it)   phase 7
+  region.ts         PURE + store: round a fix to a region centre, stay / reuse / fetch (the 1.5 km rule), the 3 kept regions   phase 7
                     (no api.ts: quests plug into discovery.ts and its goal slot, so no outside interface is needed)
   main.ts           wiring: sources -> onFix -> [me, fog, storage, places, hud]
 public/places.json  `{source, fetched, center, radius, places:[{id,name,type,lat,lng}]}` (committed)   ✅ phase 4
-tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json
+tools/fetch-places.mjs   run once on the laptop: Overpass query -> public/places.json (the SUTD region, shipped as the seed)
+server/places.ts    phase 7: the one backend piece, a Render web service. GET /places?lat&lng -> Overpass, cached per region. No database, no user data
 tests/fog.test.ts, storage.test.ts, places.test.ts, design.test.ts, gps.test.ts, today.test.ts  plain `node:assert` checks for the pure logic (fog, storage, places, coverage), the shipped places.json and the palette's contrast (Node 24 runs the TypeScript directly)
 tests/browser.mjs   dev-only headless-Chrome regression suite (`npm run test:browser`, puppeteer-core); not part of `npm test` or CI
 ```
@@ -284,6 +287,120 @@ Render setup for the branch (one time, in the Render dashboard, **New → Static
 
 Commit message: `feat: two simple quests (reach a spot, find new places)`
 
+**7. Regions: a 2 km circle that follows you** (built, waiting for your check; branch `feat/load-2km-region-around-current-location`)
+
+Goal: anyone can open the app wherever they are and get places, quests and "% explored" for the 2 km around them. Today all of that only exists for one fixed circle around SUTD. Only one region is ever loaded at a time, never a whole city.
+
+### The idea
+A **region** is a 2 km circle of places around a centre. The centre comes from your GPS, and it moves to you each time you walk far enough from it. It doesn't slide with every step.
+
+```
+        . - ~ ~ ~ - .            ● centre (your first fix, rounded)
+     .'   .-~~~~-.   '.          inner ring: 1.5 km ("still home")
+    /   .'        '.   \         outer ring: 2 km (places loaded)
+   |   |     ●      |   |
+    \   '.        .'  ↗ \        walk past the inner ring  →  new centre where you
+     '.   '-~~~~-'   '.            stand, new 2 km circle, toast "New area"
+        ' - ~ ~ ~ - '
+```
+
+- **First open:** the first accurate fix (the same `MAX_ACCURACY` gate that clears fog) becomes the centre. Places within 2 km are loaded.
+- **Walking around:** anywhere within 1.5 km of the centre (`REANCHOR_M`), nothing changes. The place list, "% explored" and the quest stay put.
+- **Walking out:** past 1.5 km, the centre moves to where you are and a new 2 km circle loads. Moving at 1.5 km rather than 2 km means at least 500 m of loaded places is always ahead of you. You never reach the edge of an empty map. Once moved, you're at the new centre, so walking back and forth along a line can't make it flip.
+- **Coming back:** the last 3 regions are kept on the phone. Any kept region whose centre is within 1.5 km of you is reused: no network, works offline.
+- **SUTD:** the shipped `public/places.json` is the SUTD region (centre SUTD, 2 km). It is always read from the file and never stored (see "As built"). Near SUTD the app never asks the server, so `?debug`, the browser tests and offline use behave exactly as today.
+
+Why this shape:
+- **One region at a time:** download and storage stay bounded (~27 KB for SUTD, ~190 KB for central Tokyo, ~840 KB for central London, measured), and it works in any city.
+- **Re-centre on leaving, not on every step:** a circle that slid with you would refetch constantly, and "% explored" would never hold still.
+- **The fog is untouched.** It's a set of cells you walked on a global grid (`fog.ts`), already saved in `localStorage`. Progress storage depends on how much you walk, not on what's loaded, so no backend or database is needed for progress.
+- **Ready for AI quests (Phase 8):** each region is a bounded, cached `Place[]`. The quest generator picks candidates from it (`makeQuest`'s 150–400 m band) and the model only writes the quest. Completion stays GPS-based, as now.
+
+### What changes, what doesn't
+Not touched: the fog and its saving, today's count (it counts place ids), quest logic (it works on whatever list it gets), and place validation (`parsePlaces`).
+
+| Piece | Today | Phase 7 |
+|---|---|---|
+| Where places come from | `public/places.json` (SUTD only) | a kept region, or `GET /places` on our Render service the first time a region is entered |
+| "% explored" circle | `circleCells(SUTD, AREA_RADIUS)` (`discovery.ts:145`) | the same call, centred on the current region |
+| Found places | indexes into the one list | recomputed from the fog for the new list (quietly, no toasts), as on every page load today |
+| Found pins on the map | added once | cleared and redrawn for the new list (`placesLayer.clear()`, new) |
+| Active quest on a region change | n/a | a find quest carries on; a reach quest whose place isn't in the new list is replaced by the next quest (same rule as `restoreQuest`) |
+| Where the map opens | `setView(SUTD)` (`map.ts:8`) | the most recent stored region's centre, falling back to SUTD (`main.ts`); `me.ts` is not changed, because Leaflet already jumps instead of animating when the target is further than the screen |
+
+### Where the places come from: a small Render service
+`server/places.ts`, run as `node server/places.ts` (Node 24 runs TypeScript directly, as `tools/fetch-places.mjs` already relies on). Plain `node:http` with no dependencies, no database, no accounts and no user data.
+
+- `GET /places?lat=..&lng=..` returns `{source, fetched, center, radius, places}`, **the same shape as `public/places.json`**. The app parses it with the existing `parsePlaces`, and the seed file is just one more region.
+- The server re-rounds `lat`/`lng` to the region grid itself, so it never trusts the client and has a bounded number of cache keys. Out-of-range or non-numeric input gets a 400.
+- It asks Overpass with the existing query (same `KINDS`, `SKIP`, User-Agent, two endpoints, 60 s timeout).
+- **Cache:** in memory, per region, kept 7 days, at most 100 regions (oldest dropped; see "As built"). Two requests for the same region at once share one Overpass call.
+- **Never caches a bad answer:** a failed request, a `remark` (Overpass timeout or out of memory), or a non-array `elements` gives a 502 and nothing is stored. An empty list from a good answer (countryside) is a valid region and is cached.
+- Headers: `Access-Control-Allow-Origin: *` (public OSM data, no cookies) and `Cache-Control: public, max-age=86400`. `GET /` answers `ok` for Render's health check. Coordinates are never logged.
+- `ponytail:` in-memory cache is lost on every deploy or restart (the next request refetches in a few seconds); Render Key Value if that ever matters. No per-IP rate limit; add one if the endpoint gets abused.
+
+The query and the filter/merge (`KINDS`, `SKIP`, the 100 m same-name merge, the radius check) move out of `tools/fetch-places.mjs` into `src/overpass.ts`, so there is one copy. The server and the tool both import it, and the tool still regenerates the SUTD file. The tool's `MIN_ELEMENTS = 50` sanity check stays in the tool only, since a real region can be nearly empty.
+
+### On the phone
+- **Rounding:** the centre is the fix rounded to `REGION_ROUND` = 0.005° (about 550 m, so the centre is at most ~390 m from you). The app rounds **before** sending, so the precise fix never leaves the phone.
+- **Kept regions:** one `localStorage` key, `fogwalk:regions:v1`, holding up to 3 `{center, fetched, places}` (most recent first, oldest dropped; the first is the current region; `:debug` added in debug mode, like the other keys). Damaged data reads as "nothing kept". A failed write is logged and the app carries on with the region in memory.
+- **On open:** the current region and its places load at once from storage, with no GPS wait and no network. The first fix then applies the 1.5 km rule.
+- **While a new region loads:** the old one stays on screen. Only one `/places` request is in flight at a time, retried twice (reusing `loadFile`'s retry shape).
+- **If it can't load** (offline on a first visit, server down): the fog still clears, and the stats card says "No places loaded for this area yet". The next try is on a fix at least 60 s later (`REGION_RETRY_MS`). No error dialogs.
+- **The message:** a toast "New area · N places within 2 km" when the region changes, using the existing `toast()`. The very first region gets no toast; the stats card shows the count.
+- **Server address:** `VITE_PLACES_API`, a build-time env var. It's set to the Render web service URL on the Render static site and to `http://localhost:3001` in a committed `.env.development` (`npm run server` starts it). If it's unset, only the SUTD region and kept regions work.
+
+### Privacy (README and the "why open" write-up must say exactly this)
+- Never leaves the phone: the walked path, the fog, finds, quests, and the precise GPS position.
+- Sent once per new region to our Render service: a point rounded to about 550 m. Render's platform request logs may record it. The service passes it to Overpass, so Overpass sees our server, not the user's phone or IP.
+- The OSM tile server already sees which area is on screen, so this is the same order of disclosure.
+- Everything is open and swappable: OpenStreetMap data, Overpass (self-hostable), and our proxy is ~one file.
+
+### Steps
+1. **Golden output first:** before moving any code, run today's `fetch-places.mjs` logic on a small hand-written Overpass answer (`tests/fixtures/overpass.json`: a skipped kind, a same-name pair to merge, a way with a `center`, one outside the radius, one without a name). Save the result as the expected output.
+2. `src/overpass.ts` (PURE: build the query for a centre; turn an answer into `Place[]` or throw on a bad answer). `tools/fetch-places.mjs` imports it. `tests/overpass.test.ts` checks it against the golden output.
+3. `src/region.ts` (PURE + store): `roundCentre(fix)`; `pickRegion(fix, current, kept)` → stay / reuse a kept one / fetch a new one; `keep(kept, region)` (keep 3, most recent first); read and write the store. `tests/region.test.ts`: rounding; the 1.5 km rule just inside and just outside; reuse picks the nearest kept region; the SUTD seed counts as kept; damaged data.
+4. `server/places.ts` and `tests/server.test.ts` (starts the server against a fake Overpass on a local port, via an `OVERPASS_URL` env var): the right shape back; the server rounds; two requests make one Overpass call; two at once share one call; 400 on bad input; 502 on a failure and on a `remark`, and the next request tries again; CORS header present. Add both tests to `npm test`, plus an `npm run server` script.
+5. `discovery.ts`: `start()` loads the current region from storage (or the seed). `onMove(fix)` (already called with every accurate fix) runs `pickRegion` and calls a new `setRegion(region)`. `setRegion` holds what the `places.json` `.then` handler does today (set `placeList`, quiet `check`, `restoreQuest`/`ensureQuest`), plus resetting `found`, redrawing pins, rebuilding the circle and the toast. `config.ts`: `REGION_ROUND`, `REANCHOR_M`, `REGION_RETRY_MS`, `PLACES_API`.
+6. `map.ts`/`me.ts`: open on the current region's centre; first fix jumps without animation. `placesLayer.ts`: `clear()`. `main.ts`: only the changed `discovery.start(...)` call.
+7. Browser tests, a Phase 7 section in `tests/browser.mjs` (geolocation override plus request interception on `/places`, answering from the fixture):
+   - A fresh profile with a fix in Tokyo makes one request whose `lat`/`lng` are already rounded (the privacy check), loads the places, and centres the map there.
+   - A reload with `/places` blocked shows the same places and makes no request.
+   - A fix 1.6 km away shows the "New area" toast and makes one request; the earlier fog cells are still there.
+   - A fix back near the first centre makes no request.
+   - A 502 shows "No places loaded for this area yet", keeps nothing, and the next fix within 60 s makes no request.
+   - A fix near SUTD never calls `/places`.
+   - All earlier sections pass unchanged.
+8. Review loop as for every phase. Then deploy both on Render and do a real check: a phone, plus Chrome DevTools → Sensors with a location outside Singapore.
+
+Render setup (one time, in the dashboard):
+- **Web service** (New → Web Service): repo `surrelsaga/map-mvp`, this branch, runtime Node, build `npm ci`, start `node server/places.ts`, `NODE_VERSION` = `24`, plan **Starter** (the free tier sleeps after 15 min and would stall a first region load for up to a minute), health check path `/`.
+- **Static site:** the Phase 6 one, switched to this branch, with `VITE_PLACES_API` = the web service's URL.
+
+Known limits (stated, not solved):
+- Found pins outside the current region aren't drawn (they come back with that region). "% explored" is per region; regions overlap, so the numbers don't add up across them.
+- Kept regions are never refreshed on the phone. `ponytail:` refetch one older than 30 days when online, if stale data shows up.
+- A first-ever open with no network has the fog but no places (unless you're near SUTD).
+- A dense city centre is large: central London was 8,536 places, ~840 KB per region, so 3 kept regions can take ~2.5 MB of the ~5 MB `localStorage`, next to the fog. A failed write is logged and the region stays in memory only. Lower `REGION_KEEP` or move to IndexedDB if that bites.
+
+Not in this phase: AI quests (Phase 8), drawing the region circle on the map, a place search or "go to another city", a bigger or adjustable radius, prefetching neighbouring regions, self-hosted Overpass, and a persistent server cache.
+
+### As built (differences from the plan above, and what was checked)
+- **The shipped SUTD file is never stored.** Only regions that came from the service are kept (`fogwalk:regions:v1`, no second "current" key: the first one is current). `pickRegion` has a fourth answer, `seed`: near SUTD with nothing stored covering you, read `places.json` again. This keeps the earlier browser tests exactly as they were (a test that serves its own `places.json` is not shadowed by a stored copy). When nothing is stored the app reads the seed at start-up, as before, and the first fix then keeps it or swaps it.
+- **A region you have left is dropped at once** when it is further than 2 km from you and nothing stored covers you (`clearRegion`), e.g. the SUTD file at start-up when the first fix is in Tokyo. Between 1.5 and 2 km the old region stays on screen until the new one arrives.
+- **A place is never announced twice** in one visit: a `seen` set (keys) makes walking back into a region quiet, and stops a find quest counting an old find again.
+- **"New area" message** only when you had been inside the previous region's circle (`inside`), so the first region after start-up in a new city gets none.
+- **Failures and retries:** a dropped connection to the service is retried (`loadFile`, +1.5 s, +4 s), but a 5xx is not: the service has already tried three Overpass servers, and asking again at once would triple the load on them. After a failure the card says "No places loaded for this area yet" and that same target (a centre, or the seed) is not asked again for `REGION_RETRY_MS` (60 s). **Only loads are gated:** walking back into a stored region, or into SUTD's file, never waits for a failure window or a running load.
+- **A load that finishes late is dropped** if it no longer covers you (further than `REANCHOR_M`): e.g. the SUTD file arriving after the first fix in Tokyo. The service has cached it, so asking again is cheap.
+- **Empty answers are not stored on the phone** (a throttled Overpass can answer 200 with nothing, and stored regions are never asked again), and the service passes them on but does not cache them. **Stored regions are budgeted** (`REGION_MAX_CHARS`, 2 MB of the ~5 MB `localStorage`): the oldest go first, and a region too big alone is not written, so the fog always has room.
+- **Server (`server/places.ts`):** the cache keeps only the gzipped body, which is always sent gzipped (every browser takes it; curl needs `--compressed`), at most 100 regions, a week each. Identical requests share one Overpass call; an expired copy is still served when Overpass is down; three Overpass servers are tried in turn (`overpass-api.de`, `overpass.openstreetmap.fr`, `overpass.kumi.systems`), 45 s each against a 40 s query timeout. It is still an open proxy with CORS `*`, no per-IP limit and no cap on parallel Overpass calls (a `ponytail:` note in the file; a limiter was built and then cut in the over-engineering review). No `OPTIONS` handling: a plain cross-origin GET is never preflighted. **The OSM France mirror was added because the official server and kumi.systems were both down while this was built** (timeouts and 500s), which is the main operational risk of this design: a region nobody has asked for yet needs a working Overpass. A region already cached by the service, or stored on a phone, does not.
+- **Measured against live OpenStreetMap data, through the real server:** Singapore (SUTD) 267 places, 4 s; central Tokyo 1,801 places, 189 KB, 8 s; central London 8,536 places, 836 KB, 7 s; a repeat request 1 ms. A real Chrome run (Vite app + this server, Tokyo fix) showed the cross-origin request working, 1,801 places, the region stored (168 KB) and the map centred there.
+- **Tests:** `tests/overpass.test.ts` (the filter/merge matches the old tool's output on a fixture; a bad Overpass answer is an error), `tests/region.test.ts`, `tests/server.test.ts` (fake Overpass), and a Phase 7 section in `tests/browser.mjs` (rounded request only, offline reload from the stored region, walking out and back, failure, no request near SUTD). Each was checked by breaking the behaviour on purpose where it mattered (e.g. an unrounded centre fails the browser suite). All earlier browser sections pass unchanged. Two things in the old tests needed care: the two-tab test now reads the merged fog from the tab that wrote last (Chrome shows another tab's `localStorage` writes a moment late, so reading from the first tab raced, and it showed up as soon as a real service was running on :3001); and the Phase 4 "flaky network" test assumes the page loads within the 5.5 s of retry pauses, so it can fail once on a loaded machine (it passed on rerun).
+- **Not verified here:** a real walk on a phone, the Render deployment (needs the dashboard), and a long soak. The official Overpass server could not be tried at all.
+- **Known limit added:** the service's cache is in memory, so a restart empties it.
+
+Commit message: `feat: load a 2 km region around the current location`
+
 ## Known limits (stated, not solved)
 - Mobile browsers pause GPS when the screen locks, so the screen has to stay on while walking. Background tracking is out of scope.
 - The standard OSM tile servers are fine for light MVP use. Switch tile provider if usage grows.
@@ -291,7 +408,7 @@ Commit message: `feat: two simple quests (reach a spot, find new places)`
 - Interpolation between fixes is skipped when the gap was covered faster than 3 m/s, or is over 200 m, so riding a bus doesn't clear a corridor between two fixes. The fixes themselves still clear around them.
 - `localStorage` holds about 400k cells (~12 bytes each). Move to IndexedDB if that's ever reached.
 - Two tabs open at once: saves are merged, so nothing is lost, but each tab only shows its own cells until it reloads.
-- Privacy wording: walked history never leaves the phone, but the map tiles come from OSM, so that server sees roughly which area is on screen. The "why open" write-up should say exactly that. Leaflet is bundled into the app, so the app itself starts offline (the tiles still need a network).
+- Privacy wording: walked history never leaves the phone, but the map tiles come from OSM, so that server sees roughly which area is on screen. (After Phase 7 our Render service also gets a region centre rounded to about 550 m, once per new region, and passes it on to Overpass. The precise position never leaves the phone. See Phase 7, Privacy.) The "why open" write-up should say exactly that. Leaflet is bundled into the app, so the app itself starts offline (the tiles still need a network).
 - Deploys: every push to `main` runs the Pages workflow (needs repo Settings → Pages → Source: GitHub Actions). Built files have content hashes in their names, so a phone never mixes old and new code. If the page says "Something went wrong loading the app", reload.
 - `index.html` can't be opened by double-click (browsers block ES modules on `file://`, and the source is TypeScript). Run `npm run dev`.
 - `node_modules/` and `dist/` are git-ignored. Commit `package-lock.json`. Pages deploys from the build, not from the repo root.

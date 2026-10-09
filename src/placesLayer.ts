@@ -27,6 +27,12 @@ export function addPlace(p: Place, fresh = false) {
   }
 }
 
+// Takes every pin off the map (the region changed: its places are not the ones on screen any more).
+export function clear() {
+  markers.forEach((m) => m.remove());
+  markers.clear();
+}
+
 // Brings a found place into view and opens its name, as if it had been tapped. Returns whether the map moved to do it.
 // The name opens only once the map has arrived: a popup opened mid-pan would pan the map again to fit itself and stop it short.
 let pending: (() => void) | null = null;

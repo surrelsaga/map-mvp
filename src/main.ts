@@ -12,8 +12,9 @@ import * as sound from './sound.ts';
 import * as placesLayer from './placesLayer.ts';
 import * as today from './today.ts';
 import * as quests from './quests.ts';
+import * as regions from './region.ts';
 import { getFlag, setFlag } from './flags.ts';
-import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY } from './config.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, START_ZOOM } from './config.ts';
 import type { Fix } from './types.ts';
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
@@ -27,7 +28,10 @@ hud.init({
   hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
 });
 const questsOn = new URLSearchParams(location.search).get('quests') !== 'off';   // ?quests=off: the plain map with only today's goal (the old behaviour)
-discovery.start(import.meta.env.BASE_URL + 'places.json', today.todayStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+const regionKey = regions.regionStoreKey(debug !== null);
+const placesApi = ((import.meta.env.VITE_PLACES_API as string | undefined) ?? '').replace(/\/+$/, '');   // the Render service; unset = only SUTD and the stored regions
+const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
 
 let lastPrecise = 0;                                 // when the last fix good enough to clear fog arrived (0 = never)
 

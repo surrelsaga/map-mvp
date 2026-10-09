@@ -13,6 +13,7 @@ export interface Stats {
   groups: Record<Group, { found: number; total: number }>;
   percent: string; fraction: number;                                    // how much of the neighbourhood is explored: "0.10%" and 0.001
   last: Place | null;
+  note: string;                                                         // why there are no places ("No places loaded for this area yet"); empty when all is well
 }
 
 // A bar that is never invisible once there is something to show (a stub), with the exact number always written beside it.
@@ -40,9 +41,9 @@ export function showGoal(goal: Goal, daily: Goal) {
   $('todayLine').textContent = `Today: ${daily.found} of ${daily.target} places`;
 }
 
-export function showStats({ goal, daily, found, total, groups, percent, fraction, last }: Stats) {
+export function showStats({ goal, daily, found, total, groups, percent, fraction, last, note }: Stats) {
   showGoal(goal, daily);
-  $('statsPlaces').textContent = total ? `${found} of ${total} places found` : `${found} places found`;
+  $('statsPlaces').textContent = note || (total ? `${found} of ${total} places found` : `${found} places found`);
   for (const g of GROUPS) {
     const li = document.querySelector(`#groups li[data-group="${g}"]`)!;
     li.querySelector('.g-count')!.textContent = `${groups[g].found} of ${groups[g].total}`;
