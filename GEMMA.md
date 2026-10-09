@@ -1,11 +1,11 @@
-# Phase 7: Gemma writes the quests (serverless, on the phone)
+# Phase 9: Gemma writes the quests (on the phone)
 
-Branch `feat/add-gemma-written-quest-hints`. Fixed by the brief: **Gemma, and no server of ours**. Everything else below was decided here, and each decision says why.
+Built first on `feat/add-gemma-written-quest-hints` (then still called Phase 7), then moved onto the 2 km region map on `feat/merge-map-with-gemma-quests` (see "On the region map" below). Fixed by the brief: **Gemma runs on the phone, not on a server of ours** (the only server is the places service of Phase 7, which never sees a quest or a prompt). Everything else below was decided here, and each decision says why.
 
 ## What it does
 
-- The quest moves off the chip to **its own flag in the top-right corner**: a round button with the quest's progress ring around a flag. The chip on the left goes back to today's goal, so the "Today: N of 3" line in the stats card is gone.
-- When a quest starts, which is the moment you **arrive at a place** (a quest finishes, and the next one starts 5 s later), its card opens under the flag. The card has one line of quest text and the exact detail ("Walk to the marked spot on the map, about 250 m away"). Tapping the flag shows the card again; tapping the map closes it. Only one card is open at a time: the stats card or the quest card.
+- The quest has **its own pill in the top-right corner**: the quest's progress ring around a flag, and what is left to do ("250 m", "1/2", "Done"). The Today button on the left is untouched.
+- When a quest starts, which is the moment you **arrive at a place** (a quest finishes, and the next one starts 5 s later), its card opens under the flag. The card has one line of quest text and the exact detail ("Walk to the marked spot on the map, about 250 m away"). Tapping the pill shows the card again; tapping the map closes it. Only one card is open at a time: the Today panel or the quest card.
 - **Gemma writes that line**, using where you are ("The player just reached SUTD Canteen") and what the quest is (direction and kind of the hidden place, or the kinds of places still hidden nearby). The card says "Written by Gemma on this phone". When Gemma is off, not loaded yet, or its answer fails the checks, a plain line is used instead ("From SUTD Canteen, head north-east to a cafe spot hidden in the fog.").
 - The line is saved with the quest, so a reload keeps it.
 
@@ -56,15 +56,23 @@ Examples from 1B: "Head north-east to a cafe concealed by the fog.", "Continue s
 - Find lines sometimes say "explore the canteen", meaning go inside; that is allowed but not ideal.
 - Pre-existing flake: the Phase 2 "fog beside trail after pan" check and the Phase 4 "several at once" check fail in about 2 of 3 runs on this Windows machine, **on the original code too** (checked). Retrying gets past them.
 
+## On the region map (what changed when it moved onto Phase 7/8)
+
+- **Pill, not a bare flag.** It shows the distance (a reach quest), the count (a find quest) or "Done", so the quest can be read without opening the card. The ring fills as you get closer.
+- **A card for each moment.** A new quest opens its card once (when Gemma is loaded, once its line is ready, so the text does not change under the reader). Arriving opens it again with **"Found it: <place>"** and the hint underneath, so the riddle resolves on screen. A first-open bubble holds the card back; the pill is there, and a tap opens it.
+- **The card offers Gemma** while it is off and the browser can run it ("Let Gemma write the hints", with the download size). The switch in the Today panel's Settings is where it is turned off.
+- **Quests follow regions.** A quest survives a region change when its place is on the new list; otherwise a reach quest is replaced by the next one. While the next region loads, a quest whose place is still within 2 km stays. A saved quest comes back on reload (R used to delete it).
+- **Phase numbering:** this is Phase 9. `?quests=off` stays, so the browser tests of the earlier phases run on the plain map.
+
 ## Files
 
 - `src/gemma.ts` (new): loads, unloads and runs the model. Transformers.js is a separate chunk, downloaded only when the switch is on.
 - `src/questText.ts` (new, pure): the facts, the prompt, the plain line and the checks. Tested in `tests/questText.test.ts` (part of `npm test`).
 - `src/discovery.ts`: builds the facts, asks Gemma when a quest starts, saves the line on the quest, drives the flag.
-- `src/hud.ts`, `index.html`, `src/style.css`: the flag, its card, the switch, one-card-at-a-time.
+- `src/hud.ts`, `index.html`, `src/style.css`: the quest pill, its card (with the Gemma offer), the switch, one-card-at-a-time.
 - `src/main.ts`: the switch (load, progress, errors, remembered on).
 - `src/quests.ts`: `text` on a quest, validated on read. `src/config.ts`: `GEMMA_*`, `HERE_M`, `LINE_MAX`. `src/flags.ts`: a flag can be turned off.
-- `tests/browser.mjs`: Phase 6 now reads the flag and card; new checks for the switch and for no WebGPU. `GEMMA=1 npm run test:browser` also runs the real model end to end.
+- `tests/browser.mjs`: the Phase 9 section (quests, regions, the card, the pill at 390 and 320 px, the switch and no WebGPU); the earlier sections run with `?quests=off`. `GEMMA=1 npm run test:browser` also runs the real model end to end.
 
 ## Check it
 

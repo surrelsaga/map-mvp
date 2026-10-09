@@ -33,8 +33,10 @@ src/
   flags.ts          a remembered yes/no (hint dismissed)   ✅ phase 5b
   icons.ts          pin icons shared by the map and the stats card   ✅ phase 5b
   sound.ts          the found-chime (WebAudio, unlocked on first tap)      ✅ phase 5
-  quests.ts         PURE + store: the two test quests (reach, find), next-quest pick, progress, the quest's goal   ✅ phase 6
+  quests.ts         PURE + store: the two quests (reach with a hidden spot, find), next-quest pick, progress, reveal and heading-away rules   ✅ phase 6/9
   questLayer.ts     the quest marker (Leaflet divIcon in the `quest` pane)   ✅ phase 6
+  questText.ts      PURE: the quest line: what Gemma is told, the checks on its answer, the plain line   ✅ phase 9
+  gemma.ts          Gemma 3 1B on the phone's GPU (Transformers.js, WebGPU), opt-in   ✅ phase 9
   overpass.ts       PURE: the Overpass query for a centre, and its answer turned into `Place[]` (moved out of tools/fetch-places.mjs; the tool and the server import it)   phase 7
   region.ts         PURE + store: round a fix to a region centre, stay / reuse / fetch (the 1.5 km rule), the 3 kept regions   phase 7
                     (no api.ts: quests plug into discovery.ts and its goal slot, so no outside interface is needed)
@@ -529,43 +531,19 @@ As built (differences from the plan above, and what was checked):
 
 Commit message: `feat(ui): one "Today" button for progress and settings; simple quests off`
 
-**9. AI quests on the phone** (planned, not built; for a later session). Built **on top of Phase 8**: the left "Today" button stays as it is; the AI quest gets its own icon at the top right. Decisions below were made after research; nothing is implemented.
+**9. Gemma writes the quests, on the region map** ✅ built, awaiting your check. Branch `feat/merge-map-with-gemma-quests` (the quest system was first built on `feat/add-gemma-written-quest-hints` and moved onto Phases 7 and 8). Decisions, spike results and limits: [`GEMMA.md`](GEMMA.md).
 
-Goal: the quest text for a reach quest is written by an open model (Gemma 3 1B) that runs **on the phone** in the browser, so the "why open" story is: open weights, free to run, works offline once downloaded, and no prompt or position leaves the phone. Completion does not change: a reach quest finishes when the fog clears its place (`quests.progress`).
+Goal: walking is the game. A quest is a riddle about a real place hidden in the fog, and you solve it by walking. The screen stays the shortest part of the experience: the pill says how far you are, the card says the hint, and arriving says what the hint was about.
 
-Decision and why:
-- **On-device (WebGPU), not on Render.** Render has no GPUs; Ollama on CPU needs a paid instance with 2 GB or more (Standard, ~$25/month or above) and is slow, and it would send place names and a rough position to our server. The only thing on Render is the places service (Phase 7).
-- **Library:** WebLLM first (it ships a prebuilt Gemma 3 1B, listed at ~563 MB download and ~711 MB VRAM, q4f16). Backup: MediaPipe LLM Inference (`.task` file, ~529 MB). Transformers.js is the third choice (no mobile Gemma 3 results found).
-- **Limits found in research (not yet tested on our phones):**
-  - iPhone Safari kills a tab at roughly 1.5 GB with no error to catch. WebLLM issue #753: a 3B model crashed on iOS 26 and a tiny one worked. 1B should fit; anything bigger will not. Gemma 4 E2B is ~3.2 GB: out.
-  - WebGPU: iOS/iPadOS 26 or newer; Chrome on Android 12+ with Qualcomm/ARM GPUs (Chrome 121+); not Firefox on Android.
-  - Speed: one third-party project measured Gemma 3 1B at ~34 tokens/s on an iPhone 17 Pro in Safari (its own engine, not WebLLM), so a short quest is about 1 to 4 s. Unverified for our setup.
-  - The first download (~0.5 GB) should be on Wi-Fi, then cached; loading into the GPU takes several seconds each session.
-- **Never load the model on page open.** It loads only after the user turns it on (the switch below), so a model that crashes the tab cannot crash-loop the app.
+As built (differences from the plan this replaced, which had WebLLM and a model that picks the place):
+- **Code picks, Gemma words.** `quests.makeQuest` picks the place (150 to 400 m away), Gemma 3 1B (Transformers.js, WebGPU, opt-in, 800 MB) writes the hint, and the GPS check completes the quest. The plain line is used when Gemma is off, not loaded, or fails its checks.
+- **Quests start by themselves** once there is a position and a list of places (the next one 5 s after one finishes). There is no separate quest icon to tap.
+- **UI:** the Today button (left) is unchanged. A quest pill sits top right (ring and flag, then "250 m", "1/2" or "Done"), with a card under it. The card carries the line, the detail, "Written by Gemma on this phone" when it was, and (while Gemma is off and possible) a one-tap offer. On arrival the card says "Found it: <place>". The Gemma switch is in the panel's Settings.
+- **Regions:** a quest survives a region change when its place is on the new list, a reach quest whose place is not is replaced, and a quest whose place is still within 2 km stays while the next region loads. `fogwalk:quest` is saved and restored (Phase 8 used to delete it).
+- **Tests:** `tests/quests.test.ts`, `tests/questText.test.ts`, and a Phase 9 section in `tests/browser.mjs` (quests with regions, the pill and card, the bubble, the Gemma offer and switch, 320 px). The earlier browser sections run with `?quests=off`. Each of two behaviours was checked by breaking it on purpose (a quest dropped during a region wait; the debug reset forgetting the quest).
+- **Not verified here:** a real walk on a phone, and Gemma on a phone GPU (`GEMMA=1 npm run test:browser` runs the real model on a laptop with WebGPU).
 
-Where it lives in the UI (on top of Phase 8; use ui-ux-pro-max, phone first):
-- **The AI icon, top right:** a round 48 px button with an SVG sparkle-style icon (no emoji), labelled "AI quests" for screen readers, with a one-time visible label next to it on first open. Tapping it opens a small quest card under it: the quest text, the distance, and "Show on map". While a quest is active the icon shows a small badge or ring. The quest's place is marked on the map with the existing flag (`questLayer.ts`).
-- **The switch, in the "Today" panel's Settings section** (Phase 8): "AI quests (Gemma)", off by default, with the line "Runs on this phone. ~0.5 GB download, Wi-Fi recommended". Turning it on starts the download and shows progress ("Downloading 40%"); the choice is remembered in `localStorage`.
-- **When there is no model** (switch off, no WebGPU, still downloading, load failed): the icon still opens its card, which says why and what to do ("Turn on AI quests in Settings", "This phone can't run the model", "Downloading…"). The simple quests were removed in Phase 8, so **there is no fallback quest**. (Bringing back the Phase 6 quests as a fallback is possible: their logic is still in `quests.ts`. Decide at the start of Phase 9.)
-
-How it plugs in:
-1. `makeQuest` (`src/quests.ts`, kept from Phase 6) already picks reach candidates (unfound places 150 to 400 m away). Hand 5 to 10 of them to the model as `{id, name, type, distance, direction}`.
-2. Ask for JSON `{id, text}`: which one to send the walker to, and one or two lines of quest text.
-3. **Validate before using it:** `id` must be one of the candidates (never trust coordinates from the model), `text` is plain text with a length cap (set with `textContent`, like place names). Anything else counts as a failure.
-4. `Reach` gets an optional `text`; `parseQuest` accepts and caps it. The quest is shown by the AI card (not the left button, which stays "Today"). `quests.progress` completes it; the toast says "Quest done".
-5. Wire it in `discovery.ts` (Phase 8 removed the old wiring; the new one starts quests from the AI icon, not automatically) and in `main.ts`.
-6. Generate ahead of time (when a region loads, or when a quest ends), not while the walker stands waiting.
-
-Steps:
-1. **10-minute check first:** open `chat.webllm.ai` on your phone and a teammate's Android, pick Gemma 3 1B, and time the download, the load and a short reply. If it crashes or crawls, the demo fallback is Ollama on a laptop behind a tunnel (not deployed, only for your own walk), and the write-up says so honestly.
-2. Spike: load the model in the app behind the Settings switch, print one reply. Measure on the phone.
-3. Pure pieces first, with Node tests: prompt builder, output validation, the `text` field in `quests.ts`.
-4. The AI icon and card, the switch, and the wiring; browser tests with a fake model that returns good, bad and slow output, and with no WebGPU.
-5. Review loop as for every phase, then a real walk, then write up.
-
-Open questions: fallback quests or not (above); the exact prompt and JSON mode (WebLLM can constrain output, to be checked); whether to tell the user a quest was written by the model.
-
-Not in this phase: a model on the server, photo or vision checks, fine-tuning, more than one quest type written by the model.
+Not in this phase: the model choosing the place, a quest icon that starts quests by hand, a "delete download" button.
 
 ## Deployment (Render)
 Two Render services from this repo, **branch `feat/load-2km-region-around-current-location`**; `NODE_VERSION=24` on both.
