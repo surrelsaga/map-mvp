@@ -3,7 +3,6 @@
 import { GROUP_LABELS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
 import type { Goal } from './today.ts';
-import { GEMMA_MB } from './config.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
@@ -51,7 +50,7 @@ export function showQuest(q: QuestView | null, reveal = false) {
   $('questLine').textContent = q.line;
   $('questDetail').textContent = q.detail;
   $('questBy').hidden = !q.byGemma;
-  offerDone = q.goal.done; syncOffer();                                 // no offer on a card that is celebrating
+  $('questCard').dataset.done = String(q.goal.done);                    // a celebrating card has no Gemma offer (CSS)
   if (reveal && open !== 'stats' && !hintOpen) openCard('quest');
 }
 
@@ -62,12 +61,8 @@ export function showGemma(on: boolean, note: string, usable = true) {
   sw.setAttribute('aria-checked', String(on));
   sw.querySelector('.state')!.textContent = on ? 'On' : 'Off';
   $('gemmaNote').textContent = note;
-  offerOk = !on && usable; syncOffer();                                 // the card offers it only while it is off and possible
-  $('questGemmaMb').textContent = `${GEMMA_MB} MB download, best on Wi-Fi`;
+  $('questGemma').hidden = on || !usable;                              // the card offers it only while it is off and possible
 }
-
-let offerOk = false, offerDone = false;
-const syncOffer = () => { $('questGemma').hidden = !offerOk || offerDone; };
 
 // At most one card is open: the panel under the button, or the quest card under the pill.
 type Card = 'stats' | 'quest' | null;

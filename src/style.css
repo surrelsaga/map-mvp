@@ -81,7 +81,7 @@ html, body { margin: 0; overflow: hidden; }
 #questCard #questLine { font-size: 18px; font-weight: 700; line-height: 1.3; }
 #questCard #questDetail { margin-top: 6px; color: var(--dusk); }
 #questCard #questBy { margin-top: 10px; font-size: 14px; color: var(--dusk); }
-#questBy[hidden], #questGemma[hidden] { display: none; }
+#questBy[hidden], #questGemma[hidden], #questCard[data-done="true"] #questGemma { display: none; }
 /* the one offer: turn Gemma on from the card. An outline, not a fill: gold is for discoveries only. */
 #questGemma {
   display: block; box-sizing: border-box; width: 100%; min-height: 48px; margin-top: 12px; padding: 8px 14px; border: 1.5px solid var(--dusk); border-radius: 12px;

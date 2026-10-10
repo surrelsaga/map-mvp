@@ -1361,7 +1361,7 @@ let q;
   assert.equal(await flag(p), 'Quest done'); assert.equal(await detail(), 'Quest done', 'the find message says so');
   assert.equal(await p.evaluate(() => document.getElementById('questDist').textContent), 'Done', 'the pill says Done');
   assert.deepEqual(await card(p), { line: 'Found it: Spot 1', detail: 'Head north to a cafe spot hidden in the fog.', gemma: false }, 'and the card opens by itself with the payoff: what the hint was pointing at');
-  assert.equal(await p.evaluate(() => document.getElementById('questGemma').hidden), true, 'without the Gemma offer: the card is celebrating');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById('questGemma')).display), 'none', 'without the Gemma offer: the card is celebrating');
   await shot(p, 'quest-done');
   assert(await flagRingAt(p, 1), 'the ring is full'); assert.equal(await pinCount(p), 0, 'the spot marker is gone: the place\'s own gold pin took over');
   assert((await pins(p)).includes('Spot 1'), 'the place is on the map now');
