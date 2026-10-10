@@ -66,3 +66,10 @@ export const GEMMA_KEY = 'fogwalk:gemma'; // set once the user has turned Gemma 
 export const GEMMA_TRIES = 5;             // answers Gemma may give for one quest line before the plain line stays (about 1 s each)
 export const HERE_M = 100;                // a place found this close to you is "where you are" in the quest line
 export const LINE_MAX = 120;              // characters: a quest line longer than this is cut at a sentence end, or not used
+
+// The wisp (Phase 10): help that is earned by trying, not given
+export const QUEST_HELP_MS = 2 * 60_000;   // a reach quest's wisp appears after this long of looking...
+export const QUEST_COLD_M = 40;            // ...or once you are this far past the closest you have been (you are going the wrong way)
+export const QUEST_CLOSE_M = 60;           // within this, the wisp circles the spot's area and the last clue unlocks
+export const BADGE_LEVELS = [5, 10, 12];   // places discovered, per level of the one badge ("Explorer")
+export const BADGE_KEY = 'fogwalk:badge:v1';   // the levels earned (and their dates); debug mode adds ':debug'
