@@ -8,7 +8,8 @@ import type { LatLng } from './types.ts';
 // already found within reach of the target (stage 2 points from it). `hidden` is the target's name: Gemma hints at it, and an answer that gives it away is thrown out.
 // A find quest has one line, with the kinds of place still hidden nearby so Gemma has something real to point at.
 export type Stage = 1 | 2 | 3;
-export type Facts = { kind: 'reach'; what: string; hidden: string; stage: Stage; near: string | null } | { kind: 'find'; need: number; kinds: string[] };
+// `legend`: the target is a famous place (stage 2 and 3 say so). `words`: a trail's kind of place, in plain words ("shops"): all the finds must be of that kind.
+export type Facts = { kind: 'reach'; what: string; hidden: string; stage: Stage; near: string | null; legend?: boolean } | { kind: 'find'; need: number; kinds: string[]; words?: string };
 
 // The bearing from `a` to `b` in degrees clockwise from north (0..360). Flat-earth maths is plenty over a few hundred metres.
 export function bearing(a: LatLng, b: LatLng) {
@@ -20,10 +21,10 @@ const an = (w: string) => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w;
 const newPlaces = (n: number) => (n === 1 ? 'one new place' : `${n} new places`);
 
 const ask = (f: Facts) => {
-  if (f.kind === 'find') return `Uncover ${newPlaces(f.need)}.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}`;
+  if (f.kind === 'find') return f.words ? `Find ${f.need} ${f.words}, a trail.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}` : `Uncover ${newPlaces(f.need)}.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}`;
   const place = f.hidden ? `${f.hidden} (${f.what})` : `${an(f.what)}`;
   if (f.stage === 1) return `Hidden place: ${place}. Give the first riddle.`;
-  if (f.stage === 2) return `Hidden place: ${place}.${f.near ? ` It is not far from ${f.near}.` : ''} The player is stuck. Give a sharper clue.`;
+  if (f.stage === 2) return `Hidden place: ${place}.${f.legend ? ' It is famous around here.' : ''}${f.near ? ` It is not far from ${f.near}.` : ''} The player is stuck. Give a sharper clue.`;
   return `Hidden place: ${place}. The player is very close now. Say it is right around them, with one last small detail.`;
 };
 
@@ -57,7 +58,7 @@ export function prompt(f: Facts) {
 
 // The plain line for a stage, when there is no Gemma text. Short, human, and the kind of place is all it fills in.
 export function template(f: Facts) {
-  if (f.kind === 'find') return `Somewhere near, new places are waiting. Uncover ${newPlaces(f.need)}.`;
+  if (f.kind === 'find') return f.words ? `A little trail: find ${f.need} ${f.words} near you.` : `Somewhere near, new places are waiting. Uncover ${newPlaces(f.need)}.`;
   return f.stage === 1 ? `${an(f.what).replace(/^a/, 'A')} is hiding in the fog nearby. Can you find it?` : f.stage === 2 ? 'Stuck? Follow the light.' : 'It’s right around you. Look up.';
 }
 
@@ -87,3 +88,6 @@ export function clean(raw: string, f: Facts): string | null {
   if (f.kind === 'find' && !/(uncover|discover|find|explore|reveal|track|search|seek|look for|new|hidden|hiding|waiting)/.test(low)) return null;
   return s;
 }
+
+// The first clue of a legend quest is fixed, so it is clear without Gemma (and Gemma writes the sharper ones after it).
+export const LEGEND_LINE = 'A local legend is hiding nearby. Can you find it?';

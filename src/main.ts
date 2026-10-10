@@ -83,7 +83,7 @@ if (debug === null) {
   me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
-  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); badges.clear(badges.storeKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
+  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); quests.clearQuest(quests.questStoreKey(true) + ':legend'); badges.clear(badges.storeKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 

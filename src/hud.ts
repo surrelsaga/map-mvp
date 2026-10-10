@@ -1,6 +1,6 @@
 // The "Today" button, the panel it opens (today's goal, what is found, and the settings), the quest pill and its card, and the first-open bubble. DOM only.
 // Everything shown is set with textContent; the only markup built here is static (the pin icons).
-import { GROUP_LABELS, discHtml } from './icons.ts';
+import { GROUP_LABELS, ICONS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
 import type { Goal } from './today.ts';
 import { BADGE_LEVELS } from './config.ts';
@@ -41,13 +41,14 @@ export function showGoal(goal: Goal) {
 // The quest pill (top right, with the quest's own ring) and its card: the line (Gemma's, or the plain one), then the detail.
 // `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over another card,
 // and not while the first-open bubble is up (the pill shows; the card opens on a tap).
-export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean }
+export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean; legend: boolean }
 export function showQuest(q: QuestView | null, reveal = false) {
   $('questBtn').hidden = !q;
   if (!q) { if (open === 'quest') openCard(null); return; }
   $('questBtn').setAttribute('aria-label', `Quest: ${q.goal.label}. Details`);
   setRing($('questBtn').querySelector('.ring')!, q.goal);
   $('questDist').textContent = q.short;
+  $('questBtn').toggleAttribute('data-legend', q.legend);                // a small star: a famous place
   $('questLine').textContent = q.line;
   $('questDetail').textContent = q.detail;
   $('questBy').hidden = !q.byGemma;
@@ -73,30 +74,41 @@ export function showGemma(on: boolean, note: string, usable = true) {
 let basicLine = false;                                                  // the quest card is showing a plain line (not Gemma's, not a finished quest)
 const syncBasic = () => { $('questBasic').hidden = !basicLine || $('questGemma').hidden; };   // "Basic hint" only where Gemma could be turned on
 
-// The badge button (bottom left) and its card: the one badge, Explorer, with a disc per level (gold and dated once earned, "7 of 10" while it is next).
+// The badge button (bottom left) and its card: Explorer with a disc per level (gold and dated once earned, "7 of 10" while it is next), then Local legend and
+// Landmark: one each, earned at a famous place (its name and the day).
 // `hasNew`: a level earned that has not been looked at yet (a dot on the button).
-export interface BadgeView { count: number; earned: Record<string, string>; hasNew: boolean }
+export interface BadgeView { count: number; earned: Record<string, string>; fame: Partial<Record<'legend' | 'landmark', { name: string; day: string }>>; hasNew: boolean }
 const niceDay = (d: string) => { const [y, m, day] = d.split('-').map(Number); return new Date(y, m - 1, day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
-export function showBadges({ count, earned, hasNew }: BadgeView) {
-  const have = BADGE_LEVELS.filter((l) => String(l) in earned).length;
+export function showBadges({ count, earned, fame, hasNew }: BadgeView) {
+  const have = BADGE_LEVELS.filter((l) => String(l) in earned).length + Object.keys(fame).length, all = BADGE_LEVELS.length + 2;
   $('medal').hidden = false;                                            // only called when badges are on (not with ?quests=off)
   $('medal').toggleAttribute('data-new', hasNew);
-  $('medal').setAttribute('aria-label', `Badges: Explorer, ${have} of ${BADGE_LEVELS.length}${hasNew ? ', new' : ''}`);
-  let nextShown = false;
-  $('badgeLevels').replaceChildren(...BADGE_LEVELS.map((l) => {
-    const got = earned[String(l)], li = document.createElement('li');
-    const disc = document.createElement('span'), name = document.createElement('span'), note = document.createElement('span');
+  $('medal').setAttribute('aria-label', `Badges: ${have} of ${all}${hasNew ? ', new' : ''}`);
+  const row = (disc: Node | string, name: string, note: string, got: boolean) => {
+    const li = document.createElement('li'), d = document.createElement('span'), body = document.createElement('span');
+    const n = document.createElement('span'), m = document.createElement('span');
     li.className = got ? 'got' : '';
-    disc.className = 'badge-disc'; disc.textContent = String(l);
-    name.className = 'badge-name'; name.textContent = `${l} places`;
-    note.className = 'badge-note';
-    note.textContent = got ? `Earned ${niceDay(got)}` : !nextShown ? `${Math.min(count, l)} of ${l}` : 'Locked';
-    if (!got) nextShown = true;
-    const body = document.createElement('span');
-    body.className = 'badge-body'; body.append(name, note);
-    li.append(disc, body);
+    d.className = 'badge-disc'; typeof disc === 'string' ? (d.textContent = disc) : d.append(disc);
+    n.className = 'badge-name'; n.textContent = name;
+    m.className = 'badge-note'; m.textContent = note;
+    body.className = 'badge-body'; body.append(n, m);
+    li.append(d, body);
     return li;
-  }));
+  };
+  const icon = (g: Group) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', '22'); s.setAttribute('height', '22');
+    s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2.2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = ICONS[g]; return s; };   // static markup from icons.ts: never a name
+  let nextShown = false;
+  const levels = BADGE_LEVELS.map((l) => {
+    const got = earned[String(l)];
+    const note = got ? `Earned ${niceDay(got)}` : !nextShown ? `${Math.min(count, l)} of ${l}` : 'Locked';
+    if (!got) nextShown = true;
+    return row(String(l), `Explorer ${l}`, note, !!got);
+  });
+  const legend = fame.legend, landmark = fame.landmark;
+  $('badgeLevels').replaceChildren(...levels,
+    row(icon('food'), 'Local legend', legend ? `${legend.name} · ${niceDay(legend.day)}` : 'Be at a famous place to eat', !!legend),
+    row(icon('outdoors'), 'Landmark', landmark ? `${landmark.name} · ${niceDay(landmark.day)}` : 'Be at a famous landmark', !!landmark));
 }
 
 // At most one card is open: the panel under the button, the quest card under the pill, or the badges.

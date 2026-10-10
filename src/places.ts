@@ -56,6 +56,15 @@ export function typeLabel(type: string): string {
   return ACRONYMS.get(words) ?? words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+// Which famous badge a place can earn: "legend" for a famous place to eat or drink, "landmark" for any other; null for most places, and for institutions that
+// merely have an encyclopedia entry (a school, a hospital: not somewhere you go to see).
+const INSTITUTIONS = new Set(['school', 'kindergarten', 'college', 'university', 'hospital', 'clinic', 'doctors', 'dentist', 'pharmacy', 'bank', 'police', 'fire_station', 'post_office', 'courthouse', 'townhall']);
+export function legendOf(p: Place): 'legend' | 'landmark' | null {
+  if (!p.fame) return null;
+  if (groupOf(p.type) === 'food') return 'legend';
+  return p.fame === 'wiki' && INSTITUTIONS.has(p.type) ? null : 'landmark';
+}
+
 // A place's identity across visits and tabs: its OpenStreetMap id when it has one.
 export const placeKey = (p: Place) => p.id ?? `${p.name}|${p.lat}|${p.lng}`;
 

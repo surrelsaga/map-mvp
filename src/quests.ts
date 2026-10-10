@@ -1,32 +1,50 @@
 // The two quests: "reach" (find a hidden spot from a hint; it is marked on the map only if you need help) and "find" (uncover new places). Pure logic plus a small store, so Node can test it.
 // Both finish the same way, by finding places, so quests need nothing from the map beyond what discovery already knows.
 import { dist } from './fog.ts';
-import { placeKey, type Place } from './places.ts';
-import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND, QUEST_KEY, REVEAL_RADIUS, QUEST_REVEAL_MS, QUEST_PAST_M, QUEST_FAR_RATIO, QUEST_FAR_MIN_M, QUEST_HELP_MS, QUEST_COLD_M, QUEST_CLOSE_M } from './config.ts';
+import { placeKey, groupOf, legendOf, type Group, type Place } from './places.ts';
+import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND, QUEST_KEY, REVEAL_RADIUS, QUEST_REVEAL_MS, QUEST_PAST_M, QUEST_FAR_RATIO, QUEST_FAR_MIN_M, QUEST_HELP_MS, QUEST_COLD_M, QUEST_CLOSE_M, TRAIL_NEED, TRAIL_R, LEGEND_MAX_M } from './config.ts';
 import type { Goal } from './today.ts';
 import type { LatLng } from './types.ts';
 
-// seq 0, 1, 2…: even is a reach quest, odd is a find quest. clues = what Gemma wrote, one per stage ('' = it could not: the plain line is used); none yet = the plain lines.
+// seq 0, 1, 2…: seq % 3 = 0 is a reach quest, 1 a find quest, 2 a trail (a find quest of one kind). clues = what Gemma wrote, one per stage ('' = it could not: the plain line is used); none yet = the plain lines.
 interface Base { seq: number; done: boolean; clues?: string[] }
 // key = the target place's id; start = metres to it when the quest began; t = when it began (ms); best = the closest you have been (m);
 // help = the wisp is out (you tried: it points the way, and the second clue is unlocked); revealed = its spot is marked on the map (the last resort)
-export interface Reach extends Base { kind: 'reach'; key: string; lat: number; lng: number; start: number; t: number; best: number; help: boolean; revealed: boolean }
-export interface Find extends Base { kind: 'find'; need: number; ids: string[] }                             // ids = the places found so far for this quest
+// legend = a famous place, further away than a reach quest goes, and never marked on the map for you (it is found by walking)
+export interface Reach extends Base { kind: 'reach'; key: string; lat: number; lng: number; start: number; t: number; best: number; help: boolean; revealed: boolean; legend: boolean }
+// ids = the places found so far for this quest; group = a trail: only places of that kind count (none: any new place does)
+export type TrailGroup = Exclude<Group, 'other'>;
+export interface Find extends Base { kind: 'find'; need: number; ids: string[]; group?: TrailGroup }
 export type Quest = Reach | Find;
 
 const MAX_NEED = 50;                                              // bounds what a damaged stored value can cost
 const MAX_TEXT = 200, MAX_CLUES = 3;
 
 // The next quest, or null when there is nothing left to find. `found` holds indexes into `places`; `me` is where you are now.
-export function makeQuest(seq: number, places: Place[], found: Set<number>, me: LatLng, rng: () => number = Math.random, now = Date.now()): Quest | null {
+// The kind with the most places still hidden within TRAIL_R of you, if it has TRAIL_NEED of them; null otherwise. Food wins a tie.
+function trailGroup(open: Place[], me: LatLng): TrailGroup | null {
+  const n: Record<TrailGroup, number> = { food: 0, shop: 0, outdoors: 0 };
+  for (const p of open) { const g = groupOf(p.type); if (g !== 'other' && dist(me, p) <= TRAIL_R) n[g]++; }
+  const best = (Object.keys(n) as TrailGroup[]).reduce((a, b) => (n[b] > n[a] ? b : a));
+  return n[best] >= TRAIL_NEED ? best : null;
+}
+
+// `legendOk`: a legend quest may be offered now (the caller allows one a day). `legend` below picks the nearest famous place within LEGEND_MAX_M.
+export function makeQuest(seq: number, places: Place[], found: Set<number>, me: LatLng, rng: () => number = Math.random, now = Date.now(), legendOk = false): Quest | null {
   const open = places.filter((_, i) => !found.has(i));
   if (!open.length) return null;
-  if (seq % 2) return { kind: 'find', seq, done: false, need: Math.min(QUEST_FIND, open.length), ids: [] };
+  if (seq % 3 === 2) {                                                      // a trail, or (nothing of one kind to string together) a plain find quest
+    const group = trailGroup(open, me);
+    if (group) return { kind: 'find', seq, done: false, need: TRAIL_NEED, ids: [], group };
+  }
+  if (seq % 3) return { kind: 'find', seq, done: false, need: Math.min(QUEST_FIND, open.length), ids: [] };
   const far = open.map((p) => ({ p, d: dist(me, p) })).filter(({ d }) => d >= REVEAL_RADIUS + 20);   // a place you're standing next to is found by the next step, so it is no quest
   if (!far.length) return null;
+  const famous = legendOk ? far.filter(({ p, d }) => legendOf(p) && d <= LEGEND_MAX_M).sort((a, b) => a.d - b.d)[0] : undefined;
+  if (famous) return { kind: 'reach', seq, done: false, key: placeKey(famous.p), lat: famous.p.lat, lng: famous.p.lng, start: famous.d, t: now, best: famous.d, help: false, revealed: false, legend: true };
   const band = far.filter(({ d }) => d >= QUEST_MIN_M && d <= QUEST_MAX_M);
   const pick = band.length ? band[Math.floor(rng() * band.length)] : far.reduce((a, b) => (b.d < a.d ? b : a));   // ponytail: nearest unfound place when none sits in the band
-  return { kind: 'reach', seq, done: false, key: placeKey(pick.p), lat: pick.p.lat, lng: pick.p.lng, start: pick.d, t: now, best: pick.d, help: false, revealed: false };
+  return { kind: 'reach', seq, done: false, key: placeKey(pick.p), lat: pick.p.lat, lng: pick.p.lng, start: pick.d, t: now, best: pick.d, help: false, revealed: false, legend: false };
 }
 
 // Applies new finds. `fresh` = every place just found (a reach target found while the page was closed still counts);
@@ -34,12 +52,14 @@ export function makeQuest(seq: number, places: Place[], found: Set<number>, me: 
 export function progress(q: Quest, fresh: Place[], announced: Place[]): Quest {
   if (q.done) return q;
   if (q.kind === 'reach') return fresh.some((p) => placeKey(p) === q.key) ? { ...q, done: true } : q;
-  const ids = [...new Set([...q.ids, ...announced.map(placeKey)])].slice(0, q.need);
+  const counted = q.group ? announced.filter((p) => groupOf(p.type) === q.group) : announced;   // a trail counts only its own kind
+  const ids = [...new Set([...q.ids, ...counted.map(placeKey)])].slice(0, q.need);
   return ids.length === q.ids.length ? q : { ...q, ids, done: ids.length >= q.need };
 }
 
 export const label = (m: number) => { const r = Math.round(m / 10) * 10; return r >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.max(10, r)} m`; };   // rounded to 10 m (round first, then pick the unit: 997 m is "1.0 km", not "1000 m"), so the chip doesn't change on every step
 const places = (n: number) => `${n} new place${n === 1 ? '' : 's'}`;
+export const GROUP_WORDS: Record<TrailGroup, string> = { food: 'food places', shop: 'shops', outdoors: 'outdoor places' };   // "find 3 shops"
 
 // How far you are from a reach quest's spot, metres (its start distance until we know where you are).
 export const distanceTo = (q: Reach, me: LatLng | null) => (me ? dist(me, q) : q.start);
@@ -52,7 +72,7 @@ export function track(q: Reach, me: LatLng | null, now: number): Reach {
   const d = distanceTo(q, me), best = Math.min(q.best, d);
   const help = q.help || (q.t > 0 && now - q.t >= QUEST_HELP_MS) ||   // (t 0: saved before quests had a start time, so there is no time to count)
      d - best >= QUEST_COLD_M || d <= QUEST_CLOSE_M;
-  const revealed = q.revealed || now - q.t >= QUEST_REVEAL_MS || (best <= q.start - QUEST_PAST_M && d - best >= QUEST_PAST_M);
+  const revealed = q.revealed || (!q.legend && now - q.t >= QUEST_REVEAL_MS) || (best <= q.start - QUEST_PAST_M && d - best >= QUEST_PAST_M);
   return best === q.best && help === q.help && revealed === q.revealed ? q : { ...q, best, help, revealed };
 }
 
@@ -72,8 +92,8 @@ export function goalOf(q: Quest, me: LatLng | null): Goal {
     const n = q.ids.length, left = q.need - n;
     return {
       title: 'Quest', found: n, target: q.need, done: q.done, progress: Math.min(1, n / q.need),
-      label: q.done ? 'Quest done' : n === 0 ? `Find ${places(q.need)}` : `${n} of ${places(q.need)}`,
-      detail: q.done ? 'Quest done. The next one starts soon.' : `Uncover ${q.need} place${q.need === 1 ? '' : 's'} you haven’t found yet, ${left} to go`,
+      label: q.done ? 'Quest done' : q.group ? (n === 0 ? `Find ${q.need} ${GROUP_WORDS[q.group]}` : `${n} of ${q.need} ${GROUP_WORDS[q.group]}`) : n === 0 ? `Find ${places(q.need)}` : `${n} of ${places(q.need)}`,
+      detail: q.done ? 'Quest done. The next one starts soon.' : q.group ? `Find ${q.need} ${GROUP_WORDS[q.group]} you haven’t found yet, ${left} to go` : `Uncover ${q.need} place${q.need === 1 ? '' : 's'} you haven’t found yet, ${left} to go`,
     };
   }
   const d = distanceTo(q, me);
@@ -93,7 +113,7 @@ export function parseQuest(raw: unknown): Quest | null {
   const base = { seq: q.seq as number, done: q.done, ...(clues.length ? { clues } : {}) };
   if (q.kind === 'find')
     return Number.isInteger(q.need) && q.need! >= 1 && q.need! <= MAX_NEED && Array.isArray(q.ids) && q.ids.length <= MAX_NEED && q.ids.every((x) => typeof x === 'string')
-      ? { ...base, kind: 'find', need: q.need!, ids: q.ids } : null;
+      ? { ...base, kind: 'find', need: q.need!, ids: q.ids, ...((q.group === 'food' || q.group === 'shop' || q.group === 'outdoors') && { group: q.group }) } : null;
   if (q.kind === 'reach')
     return typeof q.key === 'string' && q.key.length <= 80 && Number.isFinite(q.lat) && Number.isFinite(q.lng) && Number.isFinite(q.start) && q.start! > 0
       ? {
@@ -101,6 +121,7 @@ export function parseQuest(raw: unknown): Quest | null {
         t: Number.isFinite(q.t) ? q.t! : 0, best: Number.isFinite(q.best) && q.best! >= 0 ? q.best! : q.start!,
         help: typeof q.help === 'boolean' ? q.help : false,                      // saved before the wisp existed: it starts at the first clue and earns help like any other
         revealed: typeof q.revealed === 'boolean' ? q.revealed : true,           // saved before quests had hints: its spot was already marked
+        legend: q.legend === true,
       } : null;
   return null;
 }
@@ -112,6 +133,13 @@ export function readQuest(key: string): Quest | null {
 }
 export function writeQuest(key: string, q: Quest) {
   try { localStorage.setItem(key, JSON.stringify(q)); } catch { /* not remembered */ }
+}
+// The day the last legend quest was offered (one a day). Stored next to the quest, under `<quest key>:legend`.
+export function readLegendDay(questKey: string): string {
+  try { return localStorage.getItem(questKey + ':legend') ?? ''; } catch { return ''; }
+}
+export function writeLegendDay(questKey: string, day: string) {
+  try { localStorage.setItem(questKey + ':legend', day); } catch { /* not remembered */ }
 }
 export function clearQuest(key: string) {
   try { localStorage.removeItem(key); } catch { /* nothing to clear */ }

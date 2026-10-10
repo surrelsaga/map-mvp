@@ -48,6 +48,8 @@ html, body { margin: 0; overflow: hidden; }
 #questBtn[hidden] { display: none; }
 #questBtn[aria-expanded="true"] { background-image: linear-gradient(rgba(238, 243, 248, 0.08), rgba(238, 243, 248, 0.08)); }
 #questDist { white-space: nowrap; }
+.legend-star { display: none; flex: none; fill: var(--wisp); stroke: var(--wisp); stroke-width: 1.5; stroke-linejoin: round; }
+#questBtn[data-legend] .legend-star { display: block; }   /* the pale light, not gold: a famous place is a destination, not a discovery yet */
 #chip:focus-visible { box-shadow: 0 0 0 4px var(--daylight), 0 2px 10px rgba(0, 0, 0, 0.35); }   /* the id above would otherwise replace the focus ring's light band with the drop shadow */
 #chipText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gear { flex: none; fill: none; stroke: var(--dusk); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -111,7 +113,6 @@ html, body { margin: 0; overflow: hidden; }
 }
 #badgeCard[hidden] { display: none; }
 #badgeCard h2 { margin: 0; font-size: 20px; line-height: 1.2; }
-#badgeCard #badgeSub { margin: 2px 0 0; color: var(--dusk); }
 #badgeLevels { display: grid; gap: 12px; margin: 14px 0 0; padding: 0; list-style: none; }
 #badgeLevels li { display: flex; align-items: center; gap: 12px; }
 .badge-disc { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; box-sizing: border-box; border: 2px solid var(--dusk); color: var(--dusk); font-weight: 700; }

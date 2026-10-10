@@ -2,7 +2,7 @@
 /// <reference types="node" />
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parsePlaces, discover, foundMessage, typeLabel, groupOf, countsByGroup, placeKey, type Place } from '../src/places.ts';
+import { legendOf, parsePlaces, discover, foundMessage, typeLabel, groupOf, countsByGroup, placeKey, type Place } from '../src/places.ts';
 import { circleCells, formatPercent } from '../src/coverage.ts';
 import { revealPath, dist, M_PER_DEG } from '../src/fog.ts';
 import { CELL, SUTD, AREA_RADIUS } from '../src/config.ts';
@@ -129,5 +129,10 @@ assert.equal(file.center.lat, SUTD[0]); assert.equal(file.center.lng, SUTD[1]); 
 assert.deepEqual(parsePlaces({ places: [
   { name: 'A', type: 'restaurant', lat: 1, lng: 2, fame: 'michelin' }, { name: 'B', type: 'park', lat: 1, lng: 2, fame: 'wiki' },
   { name: 'C', type: 'cafe', lat: 1, lng: 2, fame: 'best ever' }, { name: 'D', type: 'cafe', lat: 1, lng: 2 }] }).map((p) => p.fame), ['michelin', 'wiki', undefined, undefined]);
+
+// which famous badge a place can earn: food places are legends, other famous places landmarks, institutions with an encyclopedia entry neither
+const fam = (type: string, fame?: 'michelin' | 'wiki') => ({ name: 'X', type, lat: 1, lng: 2, ...(fame && { fame }) });
+assert.deepEqual([legendOf(fam('restaurant', 'michelin')), legendOf(fam('cafe', 'wiki')), legendOf(fam('attraction', 'wiki')), legendOf(fam('mall', 'wiki')),
+  legendOf(fam('school', 'wiki')), legendOf(fam('hospital', 'wiki')), legendOf(fam('restaurant'))], ['legend', 'legend', 'landmark', 'landmark', null, null, null]);
 
 console.log('ok');

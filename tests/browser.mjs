@@ -1625,14 +1625,14 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   const medal = () => p.evaluate(() => { const m = document.getElementById('medal'); return m.hidden ? null : { label: m.getAttribute('aria-label'), dot: m.hasAttribute('data-new') }; });
   const rows = () => p.evaluate(() => [...document.querySelectorAll('#badgeLevels li')].map((li) => [li.className, li.querySelector('.badge-disc').textContent, li.querySelector('.badge-note').textContent]));
   await fixAt(0); await sleep(400);
-  assert.deepEqual(await medal(), { label: 'Badges: Explorer, 0 of 3', dot: false }, 'the medal is there from the first find, with no dot');
+  assert.deepEqual(await medal(), { label: 'Badges: 0 of 5', dot: false }, 'the medal is there from the first find, with no dot');
   for (const n of [100, 200, 300]) { await fixAt(n); await sleep(300); }
   assert(!(await toasts(p)).includes('Badge earned'), 'four finds: no badge yet');
   await fixAt(400); await sleep(400);                                     // the fifth place
   assert.deepEqual((await toasts(p)).slice(-1), ['Found Stop 4'], 'the find message comes first');
   assert(await waitFor(async () => (await toasts(p)).includes('Badge earned'), 5000), 'then the badge message');
   assert.equal(await p.evaluate(() => document.getElementById('toastDetail').textContent), 'Explorer · 5 places');
-  assert.deepEqual(await medal(), { label: 'Badges: Explorer, 1 of 3, new', dot: true }, 'and a dot on the medal');
+  assert.deepEqual(await medal(), { label: 'Badges: 1 of 5, new', dot: true }, 'and a dot on the medal');
   await p.click('#medal'); await sleep(300);
   assert.equal(await p.evaluate(() => !document.getElementById('badgeCard').hidden), true, 'the card opens');
   const r = await rows();
@@ -1653,7 +1653,7 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   // reload: earned stays, not announced again, no dot
   const ctx = p.browserContext(); await p.close();
   const again = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, { ...QUEST, ctx }); await sleep(1000);
-  assert.deepEqual(await again.evaluate(() => [document.getElementById('medal').getAttribute('aria-label'), document.getElementById('medal').hasAttribute('data-new')]), ['Badges: Explorer, 1 of 3', false], 'after a reload: still earned, nothing new');
+  assert.deepEqual(await again.evaluate(() => [document.getElementById('medal').getAttribute('aria-label'), document.getElementById('medal').hasAttribute('data-new')]), ['Badges: 1 of 5', false], 'after a reload: still earned, nothing new');
   assert(!(await toasts(again)).includes('Badge earned'), 'and not announced again');
   await again.close(); t('Explorer badge: levels, dot, card, reload ok');
 }
@@ -1661,6 +1661,72 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   const p = await open('?debug', undefined); await sleep(1000);
   assert.equal(await p.evaluate(() => document.getElementById('medal').hidden), true);
   await p.close(); t('no medal with quests off ok');
+}
+{ // famous places: being at one earns Local legend (a place to eat) or Landmark (any other); a school with a Wikipedia entry is neither
+  const places = [
+    { name: 'Famous Noodles', type: 'restaurant', fame: 'michelin', lat: S0.lat, lng: S0.lng },
+    { name: 'Grand Mall', type: 'mall', fame: 'wiki', lat: S0.lat + dN(120), lng: S0.lng },
+    { name: 'Old School', type: 'school', fame: 'wiki', lat: S0.lat + dN(240), lng: S0.lng }];
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const rows = () => p.evaluate(() => [...document.querySelectorAll('#badgeLevels li')].map((li) => [li.className, li.querySelector('.badge-name').textContent, li.querySelector('.badge-note').textContent]));
+  await fixAt(0); await sleep(500);
+  assert(await waitFor(async () => (await toasts(p)).includes('Badge earned'), 5000), 'a famous place to eat: a badge');
+  assert.equal(await p.evaluate(() => document.getElementById('toastDetail').textContent), 'Local legend · Famous Noodles');
+  await fixAt(120); await sleep(500);
+  await fixAt(240); await sleep(500);
+  assert(await waitFor(async () => (await p.evaluate(() => document.getElementById('toastDetail').textContent)) === 'Landmark · Grand Mall', 9000), 'then the next one, after the first has had its time');
+  assert.equal(await p.evaluate(() => document.getElementById('medal').getAttribute('aria-label')), 'Badges: 2 of 5, new');
+  await p.click('#medal'); await sleep(300);
+  const r = await rows();
+  assert.deepEqual([r[3][0], r[3][1], r[4][0], r[4][1]], ['got', 'Local legend', 'got', 'Landmark']);
+  assert.match(r[3][2], /^Famous Noodles · /); assert.match(r[4][2], /^Grand Mall · /);   // the place and the day
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('fogwalk:badge:v1')));
+  assert.deepEqual(Object.keys(saved.fame).sort(), ['landmark', 'legend'], 'saved: and no badge for the school');
+  assert(!JSON.stringify(saved).includes('Old School'));
+  await shot(p, 'badges-fame');
+  await p.close(); t('famous place badges ok');
+}
+{ // a trail: three places of one kind. Only that kind counts; a shop on the way does not
+  const place = (name, type, n) => ({ name, type, lat: S0.lat + dN(n), lng: S0.lng });
+  const places = [place('Cafe One', 'cafe', 250), place('Shop A', 'clothes', 330), place('Cafe Two', 'cafe', 420), place('Cafe Three', 'cafe', 600), place('Cafe Far', 'cafe', 900)];
+  const lastDone = { kind: 'find', seq: 1, done: true, need: 2, ids: [] };               // the quest before: the next one is seq 2, a trail
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); await p.evaluateOnNewDocument((q) => localStorage.setItem('fogwalk:quest', JSON.stringify(q)), lastDone); }, QUEST); await sleep(800);
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const state = async () => { const q = await p.evaluate(() => fogMap.quest()); return q && [q.kind, q.seq, q.group, q.ids.length, q.done]; };
+  await fixAt(0); await sleep(500);
+  assert.deepEqual(await state(), ['find', 2, 'food', 0, false], 'a food trail');
+  assert.equal(await p.evaluate(() => document.getElementById('questLine').textContent), 'A little trail: find 3 food places near you.');
+  assert.equal(await p.evaluate(() => document.getElementById('questDist').textContent), '0/3');
+  await fixAt(250); await sleep(400);
+  assert.deepEqual(await state(), ['find', 2, 'food', 1, false], 'a cafe counts');
+  await fixAt(330); await sleep(400);
+  assert.deepEqual(await state(), ['find', 2, 'food', 1, false], 'a shop on the way does not');
+  await fixAt(420); await sleep(400);
+  await fixAt(600); await sleep(500);
+  assert.equal(await p.evaluate(() => document.getElementById('questDist').textContent), 'Done');
+  assert.equal((await toasts(p)).includes('Quest done') || (await p.evaluate(() => document.getElementById('toastDetail').textContent)) === 'Quest done', true, 'and the find message says so');
+  await p.close(); t('trail quest counts only its kind ok');
+}
+{ // a legend: a famous place further away than a normal quest goes; offered once a day, and not as the very first quest
+  const places = [{ name: 'Famous Noodles', type: 'restaurant', fame: 'michelin', lat: S0.lat + dN(1000), lng: S0.lng }, { name: 'Corner Cafe', type: 'cafe', lat: S0.lat + dN(250), lng: S0.lng }];
+  const lastDone = { kind: 'find', seq: 2, done: true, need: 2, ids: [] };               // not the first quest any more: the next one (seq 3) is a reach quest
+  const setup = (q) => async (p) => { await captureFix(p); await fakePlaces({ places })(p); await p.evaluateOnNewDocument((q) => localStorage.setItem('fogwalk:quest', JSON.stringify(q)), q); };
+  const fix = (p) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 });
+  const p = await open('', setup(lastDone), QUEST); await sleep(800); await fix(p); await sleep(500);
+  const q = await p.evaluate(() => fogMap.quest());
+  assert.deepEqual([q.kind, q.legend, q.key.startsWith('Famous Noodles')], ['reach', true, true], 'the famous place, 1 km away, is the quest');
+  assert.equal(await p.evaluate(() => document.getElementById('questBtn').hasAttribute('data-legend')), true, 'its pill has the star');
+  assert.deepEqual(await p.evaluate(() => [document.getElementById('questLine').textContent, document.getElementById('questBy').hidden]), ['A local legend is hiding nearby. Can you find it?', true], 'a fixed first line, clear without Gemma');
+  const day = await p.evaluate(() => localStorage.getItem('fogwalk:quest:legend'));
+  assert.match(day, /^\d{4}-\d{2}-\d{2}$/, 'today is remembered');
+  await p.close();
+  // the same day, the next reach quest is an ordinary one
+  const ctx = await browser.createBrowserContext(); await ctx.overridePermissions(ORIGIN, ['geolocation']);
+  const one = await open('', async (p) => { await setup({ kind: 'find', seq: 2, done: true, need: 2, ids: [] })(p); await p.evaluateOnNewDocument((d) => localStorage.setItem('fogwalk:quest:legend', d), day); }, { ...QUEST, ctx }); await sleep(800); await fix(one); await sleep(500);
+  assert.equal((await one.evaluate(() => fogMap.quest())).legend, false, 'one legend a day: this one is an ordinary quest');
+  await one.close(); await ctx.close();
+  t('legend quest ok');
 }
 { // a narrow phone: the Today button and the quest pill share the top row without touching, with a long distance
   const places = [{ name: 'Far Spot', type: 'cafe', lat: S0.lat + dN(390), lng: S0.lng }];

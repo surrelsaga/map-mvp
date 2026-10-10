@@ -1,7 +1,7 @@
 // Part of `npm test`. The one badge: levels by places found, what is new, and what a damaged store reads as.
 /// <reference types="node" />
 import assert from 'node:assert';
-import { empty, reached, next, award, hasNew, highest, parse, storeKey, read, write, clear } from '../src/badges.ts';
+import { empty, reached, next, award, awardFame, seenAll, hasNew, highest, parse, storeKey, read, write, clear } from '../src/badges.ts';
 
 assert.deepEqual([reached(0), reached(4), reached(5), reached(11), reached(12), reached(99)], [[], [], [5], [5, 10], [5, 10, 12], [5, 10, 12]]);
 assert.deepEqual([next(0), next(5), next(11), next(12)], [5, 10, 12, null], 'the next level, none when all are earned');
@@ -17,13 +17,24 @@ assert.deepEqual([r.fresh, r.badges.earned], [[10, 12], { '5': '2026-10-10', '10
 assert.equal(highest(r.badges), 12);
 assert.equal(award(empty(), 40, '2026-10-10').fresh.length, 3, 'old finds earn every level the first time');
 
+// the famous badges: earned once, with the place and the day; the first one stays
+let f = awardFame(empty(), 'legend', 'Tian Tian', '2026-10-10');
+assert.deepEqual([f.fresh, f.badges.fame], [true, { legend: { name: 'Tian Tian', day: '2026-10-10' } }]);
+const again2 = awardFame(f.badges, 'legend', 'Other Place', '2026-10-11');
+assert.deepEqual([again2.fresh, again2.badges === f.badges], [false, true], 'the first place stays');
+assert.equal(hasNew(f.badges), true, 'a famous badge is new until looked at');
+assert.equal(hasNew(seenAll(f.badges)), false, 'looking clears the dot');
+assert.deepEqual(parse(JSON.parse(JSON.stringify(f.badges))), f.badges, 'it survives a round trip');
+assert.deepEqual(parse({ fame: { legend: { name: '', day: '2026-10-10' }, landmark: { name: 'X', day: 'soon' }, other: { name: 'Y', day: '2026-10-10' } }, fameSeen: ['legend', 'landmark'] }), empty(), 'a name and a real day, and only known kinds');
+
 // the dot: a level earned that was not looked at
-assert.deepEqual([hasNew(empty()), hasNew({ earned: { '5': 'x' }, seen: 0 }), hasNew({ earned: { '5': 'x' }, seen: 5 }), hasNew({ earned: { '5': 'x', '10': 'y' }, seen: 5 })], [false, true, false, true]);
+const b = (earned: Record<string, string>, seen: number) => ({ ...empty(), earned, seen });
+assert.deepEqual([hasNew(empty()), hasNew(b({ '5': 'x' }, 0)), hasNew(b({ '5': 'x' }, 5)), hasNew(b({ '5': 'x', '10': 'y' }, 5))], [false, true, false, true]);
 
 // anything read back is untrusted
 assert.deepEqual(parse(null), empty());
 assert.deepEqual(parse('x'), empty());
-assert.deepEqual(parse({ earned: { '5': '2026-10-10', '7': '2026-10-10', '10': 'yesterday' }, seen: 5 }), { earned: { '5': '2026-10-10' }, seen: 5 }, 'only known levels with a real date');
+assert.deepEqual(parse({ earned: { '5': '2026-10-10', '7': '2026-10-10', '10': 'yesterday' }, seen: 5 }), { ...empty(), earned: { '5': '2026-10-10' }, seen: 5 }, 'only known levels with a real date');
 assert.deepEqual(parse({ earned: 'no', seen: -3 }), empty());
 assert.equal(storeKey(false), 'fogwalk:badge:v1');
 assert.equal(storeKey(true), 'fogwalk:badge:v1:debug');

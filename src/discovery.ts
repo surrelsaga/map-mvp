@@ -45,10 +45,10 @@ let shownLabel = '', shownSeq = -1, shownDone = -1, shownStage = 0;    // what t
 let writing = -1;                                   // the quest Gemma is writing a line for (-1: none)
 let warned = false;                                 // the "heading away" alert has been given (again once you come back within the start distance)
 let badgeKey = '', badgeState = badges.empty();      // the Explorer badge: which levels are earned (stored), by the count of places this device has found
-const badgeView = (): hud.BadgeView => ({ count: everFound.size, earned: badgeState.earned, hasNew: badges.hasNew(badgeState) });
+const badgeView = (): hud.BadgeView => ({ count: everFound.size, earned: badgeState.earned, fame: badgeState.fame, hasNew: badges.hasNew(badgeState) });
 let badgeShown = '';                                // what the badge card shows now: it is only redrawn when that changes (not with every step)
 function showBadges() {
-  const v = badgeView(), key = `${v.count}|${Object.keys(v.earned).join()}|${v.hasNew}`;
+  const v = badgeView(), key = `${v.count}|${Object.keys(v.earned).join()}|${JSON.stringify(v.fame)}|${v.hasNew}`;
   if (key === badgeShown) return;
   badgeShown = key; hud.showBadges(v);
 }
@@ -68,12 +68,12 @@ const buzz = (ms: number) => { if (navigator.userActivation?.hasBeenActive) navi
 // What Gemma (or the plain line) is told about a quest, for a clue stage. `near` is the nearest place you have already found within 200 m of the target.
 function factsFor(q: quests.Quest, stage: questText.Stage = 1): questText.Facts {
   if (q.kind === 'find') {
-    const open = placeList.filter((_, i) => !found.has(i)).map((p) => ({ p, d: pos ? fog.dist(pos, p) : 0 })).sort((a, b) => a.d - b.d);
-    return { kind: 'find', need: q.need, kinds: [...new Set(open.slice(0, 12).map(({ p }) => places.typeLabel(p.type).toLowerCase()))].slice(0, 3) };   // the kinds of place nearest you, so Gemma has something real to name
+    const open = placeList.filter((p, i) => !found.has(i) && (!q.group || places.groupOf(p.type) === q.group)).map((p) => ({ p, d: pos ? fog.dist(pos, p) : 0 })).sort((a, b) => a.d - b.d);
+    return { kind: 'find', need: q.need, ...(q.group && { words: quests.GROUP_WORDS[q.group] }), kinds: [...new Set(open.slice(0, 12).map(({ p }) => places.typeLabel(p.type).toLowerCase()))].slice(0, 3) };   // the kinds of place nearest you, so Gemma has something real to name
   }
   const target = placeList.find((p) => places.placeKey(p) === q.key);
   const near = placeList.filter((_, i) => found.has(i)).map((p) => ({ p, d: fog.dist(p, q) })).filter(({ d }) => d <= 200).sort((a, b) => a.d - b.d)[0]?.p.name ?? null;
-  return { kind: 'reach', what: places.typeLabel(target?.type ?? 'place').toLowerCase(), hidden: target?.name ?? '', stage, near };
+  return { kind: 'reach', what: places.typeLabel(target?.type ?? 'place').toLowerCase(), hidden: target?.name ?? '', stage, near, legend: q.legend };
 }
 
 // Which clue you are on: a reach quest moves 1 → 2 (the wisp is out) → 3 (close); a find quest has one.
@@ -94,7 +94,7 @@ function showQuest(reveal = false) {
   const unlocked = shownStage !== stage && shownSeq === quest.seq;      // a new clue of the quest you are on
   const written = quest.clues?.[stage - 1] !== undefined;
   const open = reveal || arrived || unlocked || (quest.seq !== shownSeq && (written || !gemma.isReady()));
-  hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : clueOf(quest, stage), detail: name ? clueOf(quest, 1) : '', byGemma: !!quest.clues?.[stage - 1] && !name }, open);
+  hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : clueOf(quest, stage), detail: name ? clueOf(quest, 1) : '', byGemma: !!quest.clues?.[stage - 1] && !name && !(quest.kind === 'reach' && quest.legend && stage === 1), legend: quest.kind === 'reach' && quest.legend }, open);
   if (open) shownSeq = quest.seq;
   if (arrived) shownDone = quest.seq;
   shownStage = stage;
@@ -146,7 +146,9 @@ export const onWriterReady = () => { if (quest) writeClues(quest); };
 // Starts the next quest once there is a position and a list of places to pick from. Does nothing while a quest (even a finished one) is on screen.
 function ensureQuest() {
   if (!questKey || quest || !pos || !placeList.length) return;
-  const q = quests.makeQuest(lastSeq + 1, placeList, found, pos) ?? quests.makeQuest(lastSeq + 2, placeList, found, pos);   // no reach target to be had (all places are right here): a find quest instead of none
+  const day = today.dayKey(new Date()), legendOk = lastSeq >= 2 && quests.readLegendDay(questKey) !== day;   // one legend quest a day, never the very first quest: it stays special
+  const q = quests.makeQuest(lastSeq + 1, placeList, found, pos, Math.random, Date.now(), legendOk) ?? quests.makeQuest(lastSeq + 2, placeList, found, pos);   // no reach target to be had (all places are right here): a find quest instead of none
+  if (q?.kind === 'reach' && q.legend) { quests.writeLegendDay(questKey, day); q.clues = [questText.LEGEND_LINE]; }   // its first clue is fixed, so it is clear without Gemma
   if (q) { warned = false; setQuest(q); }
 }
 
@@ -220,11 +222,18 @@ function check() {
     sound.chime();                                                      // silent until the first tap, and when muted
     buzz(60);
   }
-  const got = badgeKey ? badges.award(badgeState, everFound.size, today.dayKey(new Date())) : { badges: badgeState, fresh: [] };   // after the find's own message: the badge's follows it
-  if (got.fresh.length) {
-    badgeState = got.badges; badges.write(badgeKey, badgeState);
-    const level = Math.max(...got.fresh);
-    setTimeout(() => { toast('Badge earned', `Explorer · ${level} places`); sound.chime(); buzz(150); }, news.length ? TOAST_MS + 200 : 0);   // after the find's message has had its time
+  if (badgeKey) {                                                       // after the find's own message: the badges' follow it, one at a time
+    const day = today.dayKey(new Date());
+    const got = badges.award(badgeState, everFound.size, day);
+    let wait = news.length ? TOAST_MS + 200 : 0;                        // the find's message has had its time
+    const announce = (detail: string) => { setTimeout(() => { toast('Badge earned', detail); sound.chime(); buzz(150); }, wait); wait += TOAST_MS + 200; };
+    if (got.fresh.length) { badgeState = got.badges; announce(`Explorer · ${Math.max(...got.fresh)} places`); }
+    for (const p of fresh) {                                            // having been at a famous place: the first of each kind is a badge
+      const kind = places.legendOf(p);
+      const r = kind && badges.awardFame(badgeState, kind, p.name, day);
+      if (r?.fresh) { badgeState = r.badges; announce(`${kind === 'legend' ? 'Local legend' : 'Landmark'} · ${p.name}`); }
+    }
+    if (badgeState !== got.badges || got.fresh.length) badges.write(badgeKey, badgeState);
   }
   if (badgeKey) showBadges();
   const finished = quest;
@@ -250,7 +259,7 @@ export function onMove(fix: Fix) {
 
 // The badge card was opened: what is earned has been looked at, so the dot goes.
 export function badgesSeen() {
-  badgeState = { ...badgeState, seen: badges.highest(badgeState) };
+  badgeState = badges.seenAll(badgeState);
   badges.write(badgeKey, badgeState);
   showBadges();
 }
