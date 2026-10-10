@@ -14,6 +14,7 @@ import * as today from './today.ts';
 import * as regions from './region.ts';
 import * as quests from './quests.ts';
 import * as gemma from './gemma.ts';
+import * as badges from './badges.ts';
 import { getFlag, setFlag } from './flags.ts';
 import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, OPENED_KEY, GEMMA_KEY, GEMMA_MB, START_ZOOM } from './config.ts';
 import type { Fix } from './types.ts';
@@ -30,10 +31,11 @@ hud.init({
   hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
   openedSeen: getFlag(OPENED_KEY), onOpened: () => setFlag(OPENED_KEY),
   onGemma: switchGemma,
+  onBadges: () => discovery.badgesSeen(),
 });
 const regionKey = regions.regionStoreKey(debug !== null);
 const placesApi = ((import.meta.env.VITE_PLACES_API as string | undefined) ?? '').replace(/\/+$/, '');   // the Render service; unset = only SUTD and the stored regions
-const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null, questsOn ? badges.storeKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
 if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
 
 // Gemma writes the quest lines, only once switched on (a big download). After that it loads from the browser's cache on every visit.
@@ -81,7 +83,7 @@ if (debug === null) {
   me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
-  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
+  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); badges.clear(badges.storeKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 

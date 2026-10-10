@@ -1,0 +1,49 @@
+// Part of `npm test`. The one badge: levels by places found, what is new, and what a damaged store reads as.
+/// <reference types="node" />
+import assert from 'node:assert';
+import { empty, reached, next, award, hasNew, highest, parse, storeKey, read, write, clear } from '../src/badges.ts';
+
+assert.deepEqual([reached(0), reached(4), reached(5), reached(11), reached(12), reached(99)], [[], [], [5], [5, 10], [5, 10, 12], [5, 10, 12]]);
+assert.deepEqual([next(0), next(5), next(11), next(12)], [5, 10, 12, null], 'the next level, none when all are earned');
+
+let r = award(empty(), 4, '2026-10-10');
+assert.deepEqual(r.fresh, [], 'under the first level: nothing');
+r = award(r.badges, 5, '2026-10-10');
+assert.deepEqual([r.fresh, r.badges.earned], [[5], { '5': '2026-10-10' }]);
+const again = award(r.badges, 7, '2026-10-11');
+assert.deepEqual([again.fresh, again.badges === r.badges], [[], true], 'a level is earned once, on its first day');
+r = award(r.badges, 12, '2026-10-12');
+assert.deepEqual([r.fresh, r.badges.earned], [[10, 12], { '5': '2026-10-10', '10': '2026-10-12', '12': '2026-10-12' }], 'two at once (a device with many finds): both, the highest is announced');
+assert.equal(highest(r.badges), 12);
+assert.equal(award(empty(), 40, '2026-10-10').fresh.length, 3, 'old finds earn every level the first time');
+
+// the dot: a level earned that was not looked at
+assert.deepEqual([hasNew(empty()), hasNew({ earned: { '5': 'x' }, seen: 0 }), hasNew({ earned: { '5': 'x' }, seen: 5 }), hasNew({ earned: { '5': 'x', '10': 'y' }, seen: 5 })], [false, true, false, true]);
+
+// anything read back is untrusted
+assert.deepEqual(parse(null), empty());
+assert.deepEqual(parse('x'), empty());
+assert.deepEqual(parse({ earned: { '5': '2026-10-10', '7': '2026-10-10', '10': 'yesterday' }, seen: 5 }), { earned: { '5': '2026-10-10' }, seen: 5 }, 'only known levels with a real date');
+assert.deepEqual(parse({ earned: 'no', seen: -3 }), empty());
+assert.equal(storeKey(false), 'fogwalk:badge:v1');
+assert.equal(storeKey(true), 'fogwalk:badge:v1:debug');
+
+// the store: saved, read back, cleared; blocked storage and damaged JSON read as nothing
+const data = new Map<string, string>();
+let blocked = false;
+(globalThis as { localStorage?: unknown }).localStorage = {
+  getItem: (k: string) => { if (blocked) throw new Error('blocked'); return data.get(k) ?? null; },
+  setItem: (k: string, v: string) => { if (blocked) throw new Error('blocked'); data.set(k, v); },
+  removeItem: (k: string) => { if (blocked) throw new Error('blocked'); data.delete(k); },
+};
+assert.deepEqual(read('k'), empty());
+write('k', r.badges);
+assert.deepEqual(read('k'), r.badges, 'saved and read back');
+clear('k');
+assert.deepEqual(read('k'), empty());
+data.set('k', '{{{');
+assert.deepEqual(read('k'), empty(), 'damaged JSON');
+blocked = true;
+assert.deepEqual(read('k'), empty(), 'blocked storage');
+assert.doesNotThrow(() => { write('k', r.badges); clear('k'); });
+console.log('ok');

@@ -20,16 +20,16 @@ export function show(at: LatLng, text: () => string) {
 
 export function clear() { marker?.remove(); marker = null; }
 
-// The wisp: a small floating light that leads you once you have tried (the quest gives it, see quests.track). It sits a finger's width from your dot, on the
+// The wisp: a small floating light that leads you once you have tried (the quest gives it, see quests.track). It sits just outside your cleared patch, on the
 // side the spot lies, with its tail back at you. Close to the spot it leaves your side and circles over the spot's area: an off-centre ring, not the exact point.
 // A light, not an arrow, and pale, not gold (gold means discovered).
-const OFFSET_PX = 44, AREA_M = 40, SHIFT_M = 15;
-const wispIcon = L.divIcon({
+const OFFSET_PX = 64, AREA_M = 40, SHIFT_M = 15;   // 64 px: just outside the patch your steps clear, where a pale light shows against the fog
+const wispIcon = L.divIcon({                                             // colours are in style.css (.wisp ...): one source of truth for the palette
   className: 'wisp', iconSize: [48, 48], iconAnchor: [24, 18],
   html: '<div class="wisp-turn"><div class="wisp-drift"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">'
-    + '<defs><radialGradient id="wispGlow"><stop offset="0" stop-color="#fff"/><stop offset="0.45" stop-color="#cfe6ff"/><stop offset="1" stop-color="#cfe6ff" stop-opacity="0"/></radialGradient>'
-    + '<linearGradient id="wispTail" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe6ff" stop-opacity="0.85"/><stop offset="1" stop-color="#cfe6ff" stop-opacity="0"/></linearGradient></defs>'
-    + '<path d="M20 20 Q24 46 28 20Z" fill="url(#wispTail)"/><circle cx="24" cy="18" r="11" fill="url(#wispGlow)"/><circle cx="24" cy="18" r="4" fill="#fff"/></svg></div></div>',
+    + '<defs><radialGradient id="wispGlow"><stop class="w-core" offset="0"/><stop class="w-glow" offset="0.45"/><stop class="w-glow" offset="1" stop-opacity="0"/></radialGradient>'
+    + '<linearGradient id="wispTail" x1="0" y1="0" x2="0" y2="1"><stop class="w-glow" offset="0" stop-opacity="0.85"/><stop class="w-glow" offset="1" stop-opacity="0"/></linearGradient></defs>'
+    + '<path d="M20 20 Q24 46 28 20Z" fill="url(#wispTail)"/><circle cx="24" cy="18" r="11" fill="url(#wispGlow)"/><circle class="w-orb" cx="24" cy="18" r="5"/></svg></div></div>',
 });
 type Wisp = { me: LatLng; target: LatLng; close: boolean; seq: number };
 let wisp: L.Marker | null = null, area: L.Circle | null = null, shown: Wisp | null = null;
@@ -52,7 +52,7 @@ export function setWisp(w: Wisp | null) {
   const el = wisp.getElement();
   if (el) { el.classList.toggle('is-close', w.close); (el.querySelector('.wisp-turn') as HTMLElement).style.transform = `rotate(${w.close ? 0 : Math.round(b)}deg)`; }
   if (w.close) {
-    if (!area) area = L.circle(at, { radius: AREA_M, pane: 'wisp', interactive: false, className: 'wisp-area', color: '#cfe6ff', weight: 2, dashArray: '4 8', fill: false }).addTo(map);
+    if (!area) area = L.circle(at, { radius: AREA_M, pane: 'wisp', interactive: false, className: 'wisp-area', weight: 2, dashArray: '4 8', fill: false }).addTo(map);
     else area.setLatLng(at);
   } else if (area) { area.remove(); area = null; }
 }

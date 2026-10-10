@@ -12,6 +12,7 @@ import * as quests from './quests.ts';
 import * as questLayer from './questLayer.ts';
 import * as questText from './questText.ts';
 import * as gemma from './gemma.ts';
+import * as badges from './badges.ts';
 import { toast } from './ui.ts';
 import * as regions from './region.ts';
 import { AREA_RADIUS, PLACES_RETRY_MS, PLACES_TIMEOUT_MS, QUEST_NEXT_MS, REANCHOR_M, REGION_RETRY_MS, GEMMA_TRIES } from './config.ts';
@@ -43,6 +44,8 @@ let questKey = '', lastSeq = -1;                    // where it is saved ('' = q
 let shownLabel = '', shownSeq = -1, shownDone = -1, shownStage = 0;    // what the quest pill says now, which quest has had its card opened, and which one's "Found it" has
 let writing = -1;                                   // the quest Gemma is writing a line for (-1: none)
 let warned = false;                                 // the "heading away" alert has been given (again once you come back within the start distance)
+let badgeKey = '', badgeState = badges.empty();      // the Explorer badge: which levels are earned (stored), by the count of places this device has found
+const badgeView = (): hud.BadgeView => ({ count: everFound.size, earned: badgeState.earned, hasNew: badges.hasNew(badgeState) });
 
 // The places found today, on the phone's local date: what this tab remembers plus whatever is stored (another tab may have counted too).
 // Counting which places, not how many, means the same place never counts twice, however many tabs find it. Asking also rolls over at midnight.
@@ -209,6 +212,13 @@ function check() {
     sound.chime();                                                      // silent until the first tap, and when muted
     buzz(60);
   }
+  const got = badgeKey ? badges.award(badgeState, everFound.size, today.dayKey(new Date())) : { badges: badgeState, fresh: [] };   // after the find's own message: the badge's follows it
+  if (got.fresh.length) {
+    badgeState = got.badges; badges.write(badgeKey, badgeState);
+    const level = Math.max(...got.fresh);
+    setTimeout(() => { toast('Badge earned', `Explorer · ${level} places`); sound.chime(); buzz(150); }, news.length ? 2400 : 0);
+  }
+  if (badgeKey) hud.showBadges(badgeView());
   const finished = quest;
   if (questDone) setTimeout(() => { if (quest?.seq === finished?.seq) { setQuest(null); ensureQuest(); refresh(); } }, QUEST_NEXT_MS);   // the pill says "Done" for a moment, then the next quest starts
   refresh();
@@ -228,6 +238,13 @@ export function onMove(fix: Fix) {
     showWisp();                                                         // it follows you: a step moves it
     if (first) { writeClues(quest); showQuest(); }                       // a quest restored before the first fix had no direction to speak of: word it now
   }
+}
+
+// The badge card was opened: what is earned has been looked at, so the dot goes.
+export function badgesSeen() {
+  badgeState = { ...badgeState, seen: badges.highest(badgeState) };
+  badges.write(badgeKey, badgeState);
+  hud.showBadges(badgeView());
 }
 
 // For the browser tests: the quest on screen right now (a copy).
@@ -323,10 +340,12 @@ function askAgainIfEmpty() {
 
 // Brings back the last region at once (no GPS wait, no network), or reads the shipped SUTD file when nothing is stored. No file just means nothing to discover.
 // Places this device found before show up quietly; anything else under cleared fog is a new find, even if the region arrives late.
-export function start(seed: string, api: string, regionStoreKey: string, todayStoreKey: string, foundStoreKey: string, questStoreKey: string | null) {   // questStoreKey null: quests are off. Returns the centre of the region it opened with, if any
+export function start(seed: string, api: string, regionStoreKey: string, todayStoreKey: string, foundStoreKey: string, questStoreKey: string | null, badgeStoreKey: string | null) {   // questStoreKey null: quests are off. Returns the centre of the region it opened with, if any
   seedUrl = seed; placesApi = api; regionKey = regionStoreKey; foundKey = foundStoreKey;
   todayKey = todayStoreKey;
   questKey = questStoreKey ?? '';
+  badgeKey = badgeStoreKey ?? ''; badgeState = badgeKey ? badges.read(badgeKey) : badges.empty();
+  if (badgeKey) hud.showBadges(badgeView());
   todayState = today.countToday(new Date(), [], today.readToday(todayKey));   // today's finds from earlier in the day, if the app was closed and reopened
   refresh();
   // An app left open overnight must start the new day: look again when it comes back to the foreground, and once a minute.

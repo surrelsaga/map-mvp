@@ -31,8 +31,9 @@ const paleTile = '#f2efe9';                                                  // 
 assert(contrastWith('panel', paleTile) >= 3, 'the dimmed dot\'s dark outline against a pale map tile (non-text, AA)');
 assert(contrastWith('panel', paleTile) >= 3 && contrast(color('daylight'), color('panel')) >= 3, 'the focus ring has a dark line (shows on pale tiles) and a light band (shows on dark panels)');
 
-// gold means "discovered": it may only be used by the elements that show a discovery (the goal ring, bars, the diamond, the pin discs and their pulse)
-const GOLD_OK = new Set(['.ring-arc', '.ring-check', '.bar > span', '.diamond', '.place-disc']);
+// gold means "discovered": it may only be used by the elements that show a discovery (the goal ring, bars, the diamond, the pin discs and their pulse,
+// and the badge for places discovered: its earned discs and the dot for a new one)
+const GOLD_OK = new Set(['.ring-arc', '.ring-check', '.bar > span', '.diamond', '.place-disc', '#medal[data-new]::after', '#badgeLevels li.got .badge-disc']);
 const bare = css.replace(/\/\*[^]*?\*\//g, '');                              // the stylesheet without its comments
 const goldRules = [...bare.matchAll(/var\(--first-light\)|242, 179, 61/g)].map((m) => {
   const before = bare.slice(0, m.index), open = before.lastIndexOf('{');

@@ -3,6 +3,7 @@
 import { GROUP_LABELS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
 import type { Goal } from './today.ts';
+import { BADGE_LEVELS } from './config.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
@@ -72,13 +73,41 @@ export function showGemma(on: boolean, note: string, usable = true) {
 let basicLine = false;                                                  // the quest card is showing a plain line (not Gemma's, not a finished quest)
 const syncBasic = () => { $('questBasic').hidden = !basicLine || $('questGemma').hidden; };   // "Basic hint" only where Gemma could be turned on
 
-// At most one card is open: the panel under the button, or the quest card under the pill.
-type Card = 'stats' | 'quest' | null;
+// The badge button (bottom left) and its card: the one badge, Explorer, with a disc per level (gold and dated once earned, "7 of 10" while it is next).
+// `hasNew`: a level earned that has not been looked at yet (a dot on the button).
+export interface BadgeView { count: number; earned: Record<string, string>; hasNew: boolean }
+const niceDay = (d: string) => { const [y, m, day] = d.split('-').map(Number); return new Date(y, m - 1, day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+export function showBadges({ count, earned, hasNew }: BadgeView) {
+  const have = BADGE_LEVELS.filter((l) => String(l) in earned).length;
+  $('medal').hidden = false;                                            // only called when badges are on (not with ?quests=off)
+  $('medal').toggleAttribute('data-new', hasNew);
+  $('medal').setAttribute('aria-label', `Badges: Explorer, ${have} of ${BADGE_LEVELS.length}${hasNew ? ', new' : ''}`);
+  let nextShown = false;
+  $('badgeLevels').replaceChildren(...BADGE_LEVELS.map((l) => {
+    const got = earned[String(l)], li = document.createElement('li');
+    const disc = document.createElement('span'), name = document.createElement('span'), note = document.createElement('span');
+    li.className = got ? 'got' : '';
+    disc.className = 'badge-disc'; disc.textContent = String(l);
+    name.className = 'badge-name'; name.textContent = `${l} places`;
+    note.className = 'badge-note';
+    note.textContent = got ? `Earned ${niceDay(got)}` : !nextShown ? `${Math.min(count, l)} of ${l}` : 'Locked';
+    if (!got) nextShown = true;
+    const body = document.createElement('span');
+    body.className = 'badge-body'; body.append(name, note);
+    li.append(disc, body);
+    return li;
+  }));
+}
+
+// At most one card is open: the panel under the button, the quest card under the pill, or the badges.
+type Card = 'stats' | 'quest' | 'badges' | null;
 let open: Card = null;
 function openCard(which: Card) {
   open = which;
   $('stats').hidden = which !== 'stats'; $('chip').setAttribute('aria-expanded', String(which === 'stats'));
   $('questCard').hidden = which !== 'quest'; $('questBtn').setAttribute('aria-expanded', String(which === 'quest'));
+  $('badgeCard').hidden = which !== 'badges'; $('medal').setAttribute('aria-expanded', String(which === 'badges'));
+  if (which === 'badges') onBadges();
   if (which === 'stats' && !opened) { opened = true; onOpened(); }
 }
 
@@ -105,10 +134,11 @@ export interface Controls {
   hintSeen: boolean; onHintSeen: () => void;
   openedSeen: boolean; onOpened: () => void;                            // the panel has been opened at least once
   onGemma: (on: boolean) => void;                                       // the Gemma switch (or the card's offer) was used
+  onBadges: () => void;                                                 // the badge card was opened: what is earned has been looked at
 }
 
 let hintOpen = false, onHintSeen = () => {};
-let opened = false, onOpened = () => {};
+let opened = false, onOpened = () => {}, onBadges = () => {};
 // What the first find ever adds to its message: a pointer to the button, for someone who has not opened it yet. Empty otherwise.
 export const nudge = (firstEver: boolean) => (firstEver && !opened ? 'Tap Today to see your progress' : '');
 // The first-open bubble goes away for good once the user taps anywhere or finds a place.
@@ -119,8 +149,9 @@ export function dismissHint() {
   onHintSeen();
 }
 
-export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, openedSeen, onOpened: markOpened, onGemma }: Controls) {
-  const chip = $('chip'), flag = $('questBtn'), sw = $('soundSwitch');
+export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, openedSeen, onOpened: markOpened, onGemma, onBadges: badgesLooked }: Controls) {
+  const chip = $('chip'), flag = $('questBtn'), sw = $('soundSwitch'), medal = $('medal');
+  onBadges = badgesLooked;
   // the four kinds of place, each with the same gold disc and icon as its pins on the map
   $('groups').replaceChildren(...GROUPS.map((g) => {
     const li = document.createElement('li');
@@ -137,12 +168,13 @@ export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, op
   showSound(soundOn);
   chip.onclick = () => openCard(open === 'stats' ? null : 'stats');
   flag.onclick = () => openCard(open === 'quest' ? null : 'quest');
+  medal.onclick = () => openCard(open === 'badges' ? null : 'badges');
   $('closeStats').onclick = () => { openCard(null); chip.focus({ preventScroll: true }); };
   sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; showSound(on); onSound(on); };
   $('gemmaSwitch').onclick = () => onGemma($('gemmaSwitch').getAttribute('aria-checked') !== 'true');
   $('questGemma').onclick = () => onGemma(true);
   $('lastFind').onclick = () => { openCard(null); chip.focus({ preventScroll: true }); if (lastPlace) onFocus(lastPlace); };   // the row is about to disappear: keep focus on the chip
-  const cardOf = { stats: [$('stats'), chip], quest: [$('questCard'), flag] } as const;
+  const cardOf = { stats: [$('stats'), chip], quest: [$('questCard'), flag], badges: [$('badgeCard'), medal] } as const;
   addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !open) return;
     const [card, button] = cardOf[open];

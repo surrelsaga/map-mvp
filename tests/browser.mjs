@@ -1618,6 +1618,50 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   await shot(p, 'wisp');
   await p.close(); t('wisp: earned, points at the spot, circles when close ok');
 }
+{ // the Explorer badge: levels by places discovered (5, 10, 12). A dot on the medal when a level is new; the card shows what is earned and what is next
+  const places = [0, 100, 200, 300, 400, 500].map((n, i) => ({ name: `Stop ${i}`, type: 'cafe', lat: S0.lat + dN(n), lng: S0.lng }));
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const medal = () => p.evaluate(() => { const m = document.getElementById('medal'); return m.hidden ? null : { label: m.getAttribute('aria-label'), dot: m.hasAttribute('data-new') }; });
+  const rows = () => p.evaluate(() => [...document.querySelectorAll('#badgeLevels li')].map((li) => [li.className, li.querySelector('.badge-disc').textContent, li.querySelector('.badge-note').textContent]));
+  await fixAt(0); await sleep(400);
+  assert.deepEqual(await medal(), { label: 'Badges: Explorer, 0 of 3', dot: false }, 'the medal is there from the first find, with no dot');
+  for (const n of [100, 200, 300]) { await fixAt(n); await sleep(300); }
+  assert(!(await toasts(p)).includes('Badge earned'), 'four finds: no badge yet');
+  await fixAt(400); await sleep(400);                                     // the fifth place
+  assert.deepEqual((await toasts(p)).slice(-1), ['Found Stop 4'], 'the find message comes first');
+  assert(await waitFor(async () => (await toasts(p)).includes('Badge earned'), 5000), 'then the badge message');
+  assert.equal(await p.evaluate(() => document.getElementById('toastDetail').textContent), 'Explorer · 5 places');
+  assert.deepEqual(await medal(), { label: 'Badges: Explorer, 1 of 3, new', dot: true }, 'and a dot on the medal');
+  await p.click('#medal'); await sleep(300);
+  assert.equal(await p.evaluate(() => !document.getElementById('badgeCard').hidden), true, 'the card opens');
+  const r = await rows();
+  assert.deepEqual([r[0][0], r[0][1], r[1], r[2]].flat().slice(0, 2), ['got', '5']);
+  assert.match(r[0][2], /^Earned /, 'the earned level has its date');
+  assert.deepEqual([r[1][1], r[1][2], r[2][2]], ['10', '5 of 10', 'Locked'], 'the next level shows how far it is; the one after is locked');
+  assert.equal((await medal()).dot, false, 'looking at it clears the dot');
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('fogwalk:badge:v1')));
+  assert.deepEqual([Object.keys(saved.earned), saved.seen], [['5'], 5], 'it is saved');
+  await p.click('#chip'); await sleep(300);
+  assert.equal(await p.evaluate(() => [document.getElementById('badgeCard').hidden, document.getElementById('stats').hidden]).then((x) => x.join()), 'true,false', 'one card at a time');
+  await p.click('#chip'); await sleep(200);
+  await shot(p, 'badge-card'); await p.click('#medal'); await sleep(300); await shot(p, 'badge-card');
+  await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+  const box = await p.evaluate(() => ({ medal: document.getElementById('medal').getBoundingClientRect().toJSON(), credit: document.querySelector('.leaflet-control-attribution').getBoundingClientRect().toJSON(), card: document.getElementById('badgeCard').getBoundingClientRect().toJSON() }));
+  assert(box.medal.bottom <= box.credit.top, 'the medal sits above the map credit at 320 px: ' + JSON.stringify(box));
+  assert(box.card.left >= 0 && box.card.right <= 320 && box.card.bottom <= box.medal.top, 'its card is on screen, above the medal');
+  // reload: earned stays, not announced again, no dot
+  const ctx = p.browserContext(); await p.close();
+  const again = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, { ...QUEST, ctx }); await sleep(1000);
+  assert.deepEqual(await again.evaluate(() => [document.getElementById('medal').getAttribute('aria-label'), document.getElementById('medal').hasAttribute('data-new')]), ['Badges: Explorer, 1 of 3', false], 'after a reload: still earned, nothing new');
+  assert(!(await toasts(again)).includes('Badge earned'), 'and not announced again');
+  await again.close(); t('Explorer badge: levels, dot, card, reload ok');
+}
+{ // ?quests=off is the plain map: no medal
+  const p = await open('?debug', undefined); await sleep(1000);
+  assert.equal(await p.evaluate(() => document.getElementById('medal').hidden), true);
+  await p.close(); t('no medal with quests off ok');
+}
 { // a narrow phone: the Today button and the quest pill share the top row without touching, with a long distance
   const places = [{ name: 'Far Spot', type: 'cafe', lat: S0.lat + dN(390), lng: S0.lng }];
   const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);

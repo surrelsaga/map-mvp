@@ -10,6 +10,7 @@
   --daylight: #eef3f8;
   --dusk: #93a3ba;
   --you: #2f7df6;
+  --wisp: #cfe6ff;                                  /* the quest's guiding light: pale, so it is never taken for gold */
   --ui: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
 }
 
@@ -24,7 +25,7 @@ html, body { margin: 0; overflow: hidden; }
   top: calc(12px + env(safe-area-inset-top)); z-index: 1000;
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none;   /* the pieces stack, whatever their height */
 }
-#chip, #stats, #status, #hint, #questBtn, #questCard { font-family: var(--ui); color: var(--daylight); background: var(--panel); }
+#chip, #stats, #status, #hint, #questBtn, #questCard, #medal, #badgeCard { font-family: var(--ui); color: var(--daylight); background: var(--panel); }
 #top button { touch-action: manipulation; cursor: pointer; }
 /* a press tints the control; nothing moves or scales, so nothing around it shifts */
 #chip:active, #questBtn:active, #questGemma:active, #lastFind:active, #soundSwitch:active, #gemmaSwitch:active, #closeStats:active { background-image: linear-gradient(rgba(238, 243, 248, 0.12), rgba(238, 243, 248, 0.12)); }   /* a tint, not a shadow: the focus ring keeps its shadow while pressed */
@@ -92,6 +93,32 @@ html, body { margin: 0; overflow: hidden; }
 }
 #questGemma span { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--panel); opacity: 0.8; }
 #questGemma:active { background-image: linear-gradient(rgba(26, 37, 56, 0.12), rgba(26, 37, 56, 0.12)); }
+
+/* the badge: a medal button bottom left (mirroring the recentre button), a dot on it when a level is new, and its card above it */
+#medal {
+  position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(44px + env(safe-area-inset-bottom)); z-index: 1000; touch-action: manipulation; cursor: pointer;
+  display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 1.5px solid var(--dusk); border-radius: 50%; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  background: var(--panel); color: var(--daylight);
+}
+#medal[hidden] { display: none; }
+#medal:focus-visible { box-shadow: 0 0 0 4px var(--daylight), 0 2px 10px rgba(0, 0, 0, 0.35); }
+#medal:active { background-image: linear-gradient(rgba(238, 243, 248, 0.12), rgba(238, 243, 248, 0.12)); }
+#medal[data-new]::after { content: ''; position: absolute; top: -2px; right: -2px; width: 12px; height: 12px; border-radius: 50%; background: var(--first-light); border: 2px solid var(--panel); }   /* gold: a discovery */
+#badgeCard {
+  position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 1000; box-sizing: border-box;
+  width: min(calc(100vw - 32px), 300px); padding: 16px; border-radius: 18px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4); background: var(--panel); color: var(--daylight);
+  font-size: 16px; line-height: 1.35; animation: card-in .18s ease-out;
+}
+#badgeCard[hidden] { display: none; }
+#badgeCard h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+#badgeCard #badgeSub { margin: 2px 0 0; color: var(--dusk); }
+#badgeLevels { display: grid; gap: 12px; margin: 14px 0 0; padding: 0; list-style: none; }
+#badgeLevels li { display: flex; align-items: center; gap: 12px; }
+.badge-disc { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; box-sizing: border-box; border: 2px solid var(--dusk); color: var(--dusk); font-weight: 700; }
+#badgeLevels li.got .badge-disc { background: var(--first-light); border-color: var(--first-light); color: var(--panel); }
+.badge-body { display: block; min-width: 0; }
+.badge-name { display: block; font-weight: 700; }
+.badge-note { display: block; font-size: 14px; color: var(--dusk); }
 
 /* the panel: two headed sections, "Today" and "Settings". No borders or rules inside: spacing and the headings do the separating. */
 #stats {
@@ -201,12 +228,17 @@ html, body { margin: 0; overflow: hidden; }
 .leaflet-bottom { margin-bottom: env(safe-area-inset-bottom); }
 
 #debug {
-  position: fixed; left: calc(16px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom)); z-index: 1000;
+  position: fixed; left: calc(76px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom)); z-index: 1000;
   padding: 2px 8px; border-radius: 4px; background: #c0392b; color: #fff; font: 12px system-ui, sans-serif; pointer-events: none;
 }
 #debug button { pointer-events: auto; margin-left: 6px; font: inherit; color: #c0392b; background: #fff; border: 0; border-radius: 3px; padding: 1px 6px; }
 
-/* the wisp: a pale light with a tail. It drifts a little along its bearing (up, in the turned frame) and fades back; near the spot it pulses over the area. */
+/* the wisp: a pale light with a tail. */
+.wisp .w-core { stop-color: var(--daylight); }
+.wisp .w-glow { stop-color: var(--wisp); }
+.wisp .w-orb { fill: var(--daylight); stroke: var(--panel); stroke-width: 1.5; }
+#map .wisp-area { stroke: var(--wisp); }
+/* It drifts a little along its bearing (up, in the turned frame) and fades back; near the spot it pulses over the area. */
 .wisp { pointer-events: none; }
 .wisp-turn { width: 48px; height: 48px; transform-origin: 24px 18px; transition: transform .4s ease-out; }
 .wisp-drift { animation: wisp-drift 2.4s ease-in-out infinite; filter: drop-shadow(0 0 6px rgba(207, 230, 255, 0.7)); }
@@ -218,7 +250,7 @@ html, body { margin: 0; overflow: hidden; }
   .wisp-drift, .wisp.is-close .wisp-drift { animation: none; }
   .wisp-turn { transition: none; }
   #toast { transform: none; transition: opacity .2s; }
-  #stats, #questCard { animation: none; }
+  #stats, #questCard, #badgeCard { animation: none; }
   .ring-arc, .ring-check, .ring-flag, .bar > span, .track, .thumb { transition: none; }
   .place-pin.is-new .place-disc { animation: none; }
 }

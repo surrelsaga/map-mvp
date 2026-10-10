@@ -73,6 +73,14 @@
   </section>
   <div id="status" role="status"></div>
 </div>
+<button id="medal" type="button" aria-label="Badges" aria-expanded="false" aria-controls="badgeCard" hidden>
+  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="M8.6 13.3 7 21l5-2.8 5 2.8-1.6-7.7"/></svg>
+</button>
+<section id="badgeCard" aria-labelledby="badgeTitle" hidden>
+  <h2 id="badgeTitle">Explorer</h2>
+  <p id="badgeSub">Places you have discovered</p>
+  <ul id="badgeLevels"></ul>
+</section>
 <div id="toast" role="status"><strong id="toastTitle"></strong><span id="toastDetail"></span></div>
 <button id="recentre" type="button" aria-label="Centre on me">
   <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
