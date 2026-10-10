@@ -14,8 +14,9 @@ import * as today from './today.ts';
 import * as regions from './region.ts';
 import * as quests from './quests.ts';
 import * as gemma from './gemma.ts';
+import * as badges from './badges.ts';
 import { getFlag, setFlag } from './flags.ts';
-import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, OPENED_KEY, GEMMA_KEY, GEMMA_MB, START_ZOOM } from './config.ts';
+import { MAX_ACCURACY, ROUGH_HINT_DELAY, HINT_KEY, OPENED_KEY, GEMMA_KEY, START_ZOOM } from './config.ts';
 import type { Fix } from './types.ts';
 
 const debug = new URLSearchParams(location.search).get('debug');   // ?debug or ?debug=10 (speed multiplier)
@@ -30,10 +31,11 @@ hud.init({
   hintSeen: getFlag(HINT_KEY), onHintSeen: () => setFlag(HINT_KEY),
   openedSeen: getFlag(OPENED_KEY), onOpened: () => setFlag(OPENED_KEY),
   onGemma: switchGemma,
+  onBadges: () => discovery.badgesSeen(),
 });
 const regionKey = regions.regionStoreKey(debug !== null);
 const placesApi = ((import.meta.env.VITE_PLACES_API as string | undefined) ?? '').replace(/\/+$/, '');   // the Render service; unset = only SUTD and the stored regions
-const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
+const home = discovery.start(import.meta.env.BASE_URL + 'places.json', placesApi, regionKey, today.todayStoreKey(debug !== null), today.foundStoreKey(debug !== null), questsOn ? quests.questStoreKey(debug !== null) : null, questsOn ? badges.storeKey(debug !== null) : null);   // starts loading right away; places already in restored fog appear quietly
 if (home) map.setView([home.lat, home.lng], START_ZOOM, { animate: false });   // open where you last were, not at SUTD
 
 // Gemma writes the quest lines, only once switched on (a big download). After that it loads from the browser's cache on every visit.
@@ -41,19 +43,27 @@ let attempt = 0;                                                      // which s
 function switchGemma(on: boolean) {
   const mine = ++attempt;
   setFlag(GEMMA_KEY, on);
-  if (!on) { gemma.unload(); hud.showGemma(false, `${GEMMA_MB} MB download, runs on this phone`); return; }
+  if (!on) { gemma.unload(); hud.showGemma(false, offNote(), true, offer()); return; }
   hud.showGemma(true, 'Loading…');
   gemma.load((percent) => hud.showGemma(true, `Downloading ${percent}%`)).then(
-    () => { hud.showGemma(true, 'Runs on this phone, offline'); discovery.onWriterReady(); },
+    () => { hud.showGemma(true, gemma.usingGpu() ? 'Runs on this phone, offline' : 'Runs on this phone’s processor (slower), offline'); discovery.onWriterReady(); },
     (e) => {
       if (mine !== attempt) return;                                    // switched off (or on again) while it loaded: nothing went wrong
       console.warn('Gemma could not load:', e);
-      hud.showGemma(false, 'Could not load. Tap to try again');         // the opt-in stays: offline on a train says nothing about next time, and a retry loads from the cache
+      hud.showGemma(false, 'Could not load. Tap to try again', true, offer());   // the opt-in stays: offline on a train says nothing about next time, and a retry loads from the cache
     },
   );
 }
+// What turning Gemma on costs here. Without WebGPU it is the smaller model on the processor, and inside an app's own browser (a link opened in a chat app)
+// the phone's real browser usually has WebGPU: say so, so the faster one is one tap away.
+const inApp = /\bwv\b|FBAN|FBAV|Instagram|Line\/|Zalo|Telegram|MicroMessenger|WhatsApp/i.test(navigator.userAgent);
+const offNote = () => {
+  const { gpu, mb } = gemma.plan();
+  return gpu ? `${mb} MB download, runs on this phone` : `${mb} MB download, a smaller Gemma on this phone’s processor${inApp ? '. For the faster one, open this page in Chrome or Safari' : ''}`;
+};
+const offer = () => `${gemma.plan().mb} MB, once · runs on this phone · Wi-Fi recommended`;
 if (questsOn) {
-  if (!gemma.supported()) hud.showGemma(false, 'Needs WebGPU, which this browser lacks', false);
+  if (!gemma.supported()) hud.showGemma(false, 'This browser can’t run Gemma', false);
   else switchGemma(getFlag(GEMMA_KEY));
 }
 
@@ -81,7 +91,7 @@ if (debug === null) {
   me.watchStale((stale) => say(stale ? 'No GPS signal. Showing where you last were.' : ''), () => probe(onFix));
   startGps(onFix, (msg, persistent) => { if (persistent || !lastPrecise) say(msg); });   // once fog is clearing, a missed update isn't worth a message
 } else {
-  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
+  showDebugBadge(() => { saver.stop(); storage.clearFog(storeKey); storage.clearFog(today.foundStoreKey(true)); quests.clearQuest(quests.questStoreKey(true)); quests.clearQuest(quests.questStoreKey(true) + ':legend'); badges.clear(badges.storeKey(true)); location.reload(); });   // stop first (for good): a walk tick during the reload could otherwise save the old fog again
   startDebugWalk(map, me.where, onFix, Number(debug));
 }
 

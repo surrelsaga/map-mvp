@@ -1,19 +1,204 @@
 {
   "version": 0.6,
   "elements": [
-    { "type": "node", "id": 1, "lat": 1.3420, "lon": 103.9640, "tags": { "name": "Zeta Cafe", "amenity": "cafe" } },
-    { "type": "node", "id": 2, "lat": 1.3425, "lon": 103.9645, "tags": { "name": "Carpark A", "amenity": "parking" } },
-    { "type": "node", "id": 3, "lat": 1.3500, "lon": 103.9700, "tags": { "name": "7-Eleven", "shop": "convenience" } },
-    { "type": "way", "id": 4, "center": { "lat": 1.3502, "lon": 103.9702 }, "tags": { "name": "7-Eleven", "shop": "convenience" } },
-    { "type": "way", "id": 5, "center": { "lat": 1.3450, "lon": 103.9600 }, "tags": { "name": "Big Park", "leisure": "park" } },
-    { "type": "node", "id": 6, "lat": 1.3410, "lon": 103.9630, "tags": { "amenity": "cafe" } },
-    { "type": "node", "id": 7, "lat": 1.4000, "lon": 103.9638, "tags": { "name": "Far Away", "tourism": "attraction" } },
-    { "type": "node", "id": 8, "lat": 1.3390, "lon": 103.9620, "tags": { "name": "Pavilion", "amenity": "parking", "tourism": "attraction" } },
-    { "type": "node", "id": 9, "lat": 1.3395, "lon": 103.9625, "tags": { "name": "Plain Historic", "historic": "yes" } },
-    { "type": "node", "id": 10, "lat": 1.3380, "lon": 103.9600, "tags": { "name": "Alpha Cafe", "amenity": "cafe" } },
-    { "type": "node", "id": 11, "tags": { "name": "No Coords", "amenity": "cafe" } },
-    { "type": "node", "id": 12, "lat": 1.3440, "lon": 103.9680, "tags": { "name": "  Padded  ", "amenity": "pub" } },
-    { "type": "node", "id": 13, "lat": 1.3441, "lon": 103.9690, "tags": { "name": "Same Name", "amenity": "cafe" } },
-    { "type": "node", "id": 14, "lat": 1.3560, "lon": 103.9700, "tags": { "name": "Same Name", "amenity": "cafe" } }
+    {
+      "type": "node",
+      "id": 1,
+      "lat": 1.342,
+      "lon": 103.964,
+      "tags": {
+        "name": "Zeta Cafe",
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 2,
+      "lat": 1.3425,
+      "lon": 103.9645,
+      "tags": {
+        "name": "Carpark A",
+        "amenity": "parking"
+      }
+    },
+    {
+      "type": "node",
+      "id": 3,
+      "lat": 1.35,
+      "lon": 103.97,
+      "tags": {
+        "name": "7-Eleven",
+        "shop": "convenience"
+      }
+    },
+    {
+      "type": "way",
+      "id": 4,
+      "center": {
+        "lat": 1.3502,
+        "lon": 103.9702
+      },
+      "tags": {
+        "name": "7-Eleven",
+        "shop": "convenience"
+      }
+    },
+    {
+      "type": "way",
+      "id": 5,
+      "center": {
+        "lat": 1.345,
+        "lon": 103.96
+      },
+      "tags": {
+        "name": "Big Park",
+        "leisure": "park"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6,
+      "lat": 1.341,
+      "lon": 103.963,
+      "tags": {
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 7,
+      "lat": 1.4,
+      "lon": 103.9638,
+      "tags": {
+        "name": "Far Away",
+        "tourism": "attraction"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8,
+      "lat": 1.339,
+      "lon": 103.962,
+      "tags": {
+        "name": "Pavilion",
+        "amenity": "parking",
+        "tourism": "attraction"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9,
+      "lat": 1.3395,
+      "lon": 103.9625,
+      "tags": {
+        "name": "Plain Historic",
+        "historic": "yes"
+      }
+    },
+    {
+      "type": "node",
+      "id": 10,
+      "lat": 1.338,
+      "lon": 103.96,
+      "tags": {
+        "name": "Alpha Cafe",
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 11,
+      "tags": {
+        "name": "No Coords",
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12,
+      "lat": 1.344,
+      "lon": 103.968,
+      "tags": {
+        "name": "  Padded  ",
+        "amenity": "pub"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13,
+      "lat": 1.3441,
+      "lon": 103.969,
+      "tags": {
+        "name": "Same Name",
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 14,
+      "lat": 1.356,
+      "lon": 103.97,
+      "tags": {
+        "name": "Same Name",
+        "amenity": "cafe"
+      }
+    },
+    {
+      "type": "node",
+      "id": 15,
+      "lat": 1.3452,
+      "lon": 103.961,
+      "tags": {
+        "name": "Star Noodles",
+        "amenity": "restaurant",
+        "award:michelin": "bib_gourmand"
+      }
+    },
+    {
+      "type": "node",
+      "id": 16,
+      "lat": 1.346,
+      "lon": 103.962,
+      "tags": {
+        "name": "Old Shrine",
+        "amenity": "place_of_worship",
+        "wikidata": "Q123"
+      }
+    },
+    {
+      "type": "node",
+      "id": 17,
+      "lat": 1.347,
+      "lon": 103.963,
+      "tags": {
+        "name": "Chain Burger",
+        "amenity": "fast_food",
+        "brand": "Chain",
+        "brand:wikidata": "Q38076"
+      }
+    },
+    {
+      "type": "node",
+      "id": 18,
+      "lat": 1.348,
+      "lon": 103.964,
+      "tags": {
+        "name": "Famous Hall",
+        "amenity": "restaurant"
+      }
+    },
+    {
+      "type": "way",
+      "id": 19,
+      "center": {
+        "lat": 1.3481,
+        "lon": 103.9641
+      },
+      "tags": {
+        "name": "Famous Hall",
+        "amenity": "restaurant",
+        "wikipedia": "en:Famous Hall"
+      }
+    }
   ]
 }

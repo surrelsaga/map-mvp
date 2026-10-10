@@ -29,7 +29,7 @@ export const REANCHOR_M = 1500;           // walk further than this from the reg
 export const REGION_KEEP = 3;             // regions kept on the phone, most recent first
 export const REGION_RETRY_MS = 60_000;    // after a failed load, wait this long before asking again
 export const REGION_MAX_CHARS = 1_000_000;   // stored regions never take more than this of localStorage's ~5 MB (some browsers count 2 bytes per character), so the fog (fogwalk:v1) always has room; one dense city centre (~0.85 MB) still fits
-export const REGION_KEY = 'fogwalk:regions:v1';   // the kept regions; debug mode adds ':debug'
+export const REGION_KEY = 'fogwalk:regions:v2';   // the kept regions; debug mode adds ':debug'. v2: places carry `fame` (v1 regions have none, and are never re-fetched, so they are let go)
 export const PLACES_TIMEOUT_MS = 150_000;   // a places-service request that takes longer is a failure (the service may try three Overpass servers in turn, 45 s each)
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
 
@@ -62,7 +62,22 @@ export const CROWD_PX = 22;               // found-place pins closer than this o
 // Gemma writes the quest line (opt-in: the model downloads once from Hugging Face, then runs on the phone's GPU; nothing about you is sent)
 export const GEMMA_MODEL = 'onnx-community/gemma-3-1b-it-ONNX-GQA';   // Gemma 3 1B, ~800 MB. The 270M model (~300 MB) was tried: it mostly copies the prompt's examples
 export const GEMMA_MB = 800;              // the download size the switch shows before it is turned on
+// No WebGPU (iPhones before iOS 26, many Android GPUs, in-app browsers): the smaller Gemma 3 270M runs on the processor (WebAssembly) instead. Slower
+// and plainer, but it works everywhere; the clues are written ahead in the background, so nobody waits for it.
+export const GEMMA_SMALL_REPO = 'ggml-org/gemma-3-270m-it-qat-GGUF';   // Gemma 3 270M, quantization-aware trained, 4-bit GGUF (for llama.cpp)
+export const GEMMA_SMALL_FILE = 'gemma-3-270m-it-qat-Q4_0.gguf';
+export const GEMMA_SMALL_MB = 240;
 export const GEMMA_KEY = 'fogwalk:gemma'; // set once the user has turned Gemma on (it then loads from the browser's cache on every visit)
 export const GEMMA_TRIES = 5;             // answers Gemma may give for one quest line before the plain line stays (about 1 s each)
 export const HERE_M = 100;                // a place found this close to you is "where you are" in the quest line
 export const LINE_MAX = 120;              // characters: a quest line longer than this is cut at a sentence end, or not used
+
+// The wisp (Phase 10): help that is earned by trying, not given
+export const QUEST_HELP_MS = 2 * 60_000;   // a reach quest's wisp appears after this long of looking...
+export const QUEST_COLD_M = 40;            // ...or once you are this far past the closest you have been (you are going the wrong way)
+export const QUEST_CLOSE_M = 60;           // within this, the wisp circles the spot's area and the last clue unlocks
+export const TRAIL_NEED = 3;               // places a trail quest asks for (all of one kind: three cafes, three shops...)
+export const TRAIL_R = 1000;               // a trail is offered only when that many of one kind are still hidden within this many metres of you
+export const LEGEND_MAX_M = 1500;          // a legend quest (a famous place) may be this far: further than any ordinary reach quest
+export const BADGE_LEVELS = [5, 10, 12];   // places discovered, per level of the one badge ("Explorer")
+export const BADGE_KEY = 'fogwalk:badge:v1';   // the levels earned (and their dates); debug mode adds ':debug'

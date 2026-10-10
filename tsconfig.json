@@ -10,7 +10,8 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [],
+    "paths": { "@wllama/wllama": ["./node_modules/@wllama/wllama/esm/index.d.ts"] }
   },
   "include": ["src", "tests", "server", "vite.config.ts"]
 }

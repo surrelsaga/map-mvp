@@ -2,7 +2,7 @@
 /// <reference types="node" />
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parsePlaces, discover, foundMessage, typeLabel, groupOf, countsByGroup, placeKey, type Place } from '../src/places.ts';
+import { legendOf, parsePlaces, discover, foundMessage, typeLabel, groupOf, countsByGroup, placeKey, type Place } from '../src/places.ts';
 import { circleCells, formatPercent } from '../src/coverage.ts';
 import { revealPath, dist, M_PER_DEG } from '../src/fog.ts';
 import { CELL, SUTD, AREA_RADIUS } from '../src/config.ts';
@@ -124,5 +124,26 @@ assert.equal(some.food.found + some.shop.found + some.outdoors.found + some.othe
 assert(some.food.found >= 1 && some.shop.found >= 1, 'food and shop each got theirs');
 assert.equal(some.food.total, all.food.total, 'totals do not change with what is found');
 assert.equal(file.center.lat, SUTD[0]); assert.equal(file.center.lng, SUTD[1]); assert.equal(file.radius, AREA_RADIUS);   // the fetch script and config agree
+
+// fame: only the two known values survive (the file is untrusted)
+assert.deepEqual(parsePlaces({ places: [
+  { name: 'A', type: 'restaurant', lat: 1, lng: 2, fame: 'michelin' }, { name: 'B', type: 'park', lat: 1, lng: 2, fame: 'wiki' },
+  { name: 'C', type: 'cafe', lat: 1, lng: 2, fame: 'best ever' }, { name: 'D', type: 'cafe', lat: 1, lng: 2 }] }).map((p) => p.fame), ['michelin', 'wiki', undefined, undefined]);
+
+// which famous badge a place can earn: food places are legends, other famous places landmarks, institutions with an encyclopedia entry neither
+const fam = (type: string, fame?: 'michelin' | 'wiki') => ({ name: 'X', type, lat: 1, lng: 2, ...(fame && { fame }) });
+assert.deepEqual([legendOf(fam('restaurant', 'michelin')), legendOf(fam('cafe', 'wiki')), legendOf(fam('attraction', 'wiki')), legendOf(fam('mall', 'wiki')),
+  legendOf(fam('school', 'wiki')), legendOf(fam('hospital', 'wiki')), legendOf(fam('restaurant'))], ['legend', 'legend', 'landmark', 'landmark', null, null, null]);
+
+// iconic eateries: matched by name (whole words), food places only
+const iconic = (name: string, type: string) => parsePlaces({ places: [{ name, type, lat: 1, lng: 2 }] })[0];
+assert.equal(iconic('Song Fa', 'restaurant').fame, 'iconic', 'a name on the list');
+assert.equal(iconic('Song Fa Bak Kut Teh (Eu Tong Sen Street)', 'restaurant').fame, 'iconic', 'with more words round it');
+assert.equal(iconic('SONG FA - Bak Kut Teh', 'fast_food').fame, 'iconic', 'case and punctuation do not matter');
+assert.equal(iconic('Song Fang Tailor', 'restaurant').fame, undefined, 'whole words only');
+assert.equal(iconic('Song Fa', 'clothes').fame, undefined, 'a shop with that name is not an eatery');
+assert.equal(iconic('Wee Nam Kee Chicken Rice', 'restaurant').fame, 'iconic');
+assert.equal(legendOf(iconic('Wee Nam Kee Chicken Rice', 'restaurant')), 'legend', 'a famous place to eat: a Local legend');
+assert.equal(parsePlaces({ places: [{ name: 'Song Fa', type: 'restaurant', lat: 1, lng: 2, fame: 'michelin' }] })[0].fame, 'michelin', 'a tagged award wins over the list');
 
 console.log('ok');

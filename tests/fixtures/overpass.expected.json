@@ -21,6 +21,29 @@
     "lng": 103.96
   },
   {
+    "id": "node/17",
+    "name": "Chain Burger",
+    "type": "fast_food",
+    "lat": 1.347,
+    "lng": 103.963
+  },
+  {
+    "id": "node/18",
+    "name": "Famous Hall",
+    "type": "restaurant",
+    "lat": 1.348,
+    "lng": 103.964,
+    "fame": "wiki"
+  },
+  {
+    "id": "node/16",
+    "name": "Old Shrine",
+    "type": "place_of_worship",
+    "lat": 1.346,
+    "lng": 103.962,
+    "fame": "wiki"
+  },
+  {
     "id": "node/12",
     "name": "Padded",
     "type": "pub",
@@ -47,6 +70,14 @@
     "type": "cafe",
     "lat": 1.356,
     "lng": 103.97
+  },
+  {
+    "id": "node/15",
+    "name": "Star Noodles",
+    "type": "restaurant",
+    "lat": 1.3452,
+    "lng": 103.961,
+    "fame": "michelin"
   },
   {
     "id": "node/1",

@@ -1,8 +1,10 @@
 // The "Today" button, the panel it opens (today's goal, what is found, and the settings), the quest pill and its card, and the first-open bubble. DOM only.
 // Everything shown is set with textContent; the only markup built here is static (the pin icons).
-import { GROUP_LABELS, discHtml } from './icons.ts';
+import { GROUP_LABELS, ICONS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
 import type { Goal } from './today.ts';
+import { BADGE_LEVELS } from './config.ts';
+import { FAME_LABEL, type Badges } from './badges.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
@@ -38,39 +40,89 @@ export function showGoal(goal: Goal) {
 }
 
 // The quest pill (top right, with the quest's own ring) and its card: the line (Gemma's, or the plain one), then the detail.
-// `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over the stats panel,
+// `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over another card,
 // and not while the first-open bubble is up (the pill shows; the card opens on a tap).
-export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean }
+// byGemma: the line is Gemma's; plain: it is the plain fallback (a fixed line, like a legend's first, is neither)
+export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean; legend: boolean; plain: boolean }
 export function showQuest(q: QuestView | null, reveal = false) {
   $('questBtn').hidden = !q;
   if (!q) { if (open === 'quest') openCard(null); return; }
   $('questBtn').setAttribute('aria-label', `Quest: ${q.goal.label}. Details`);
   setRing($('questBtn').querySelector('.ring')!, q.goal);
   $('questDist').textContent = q.short;
+  $('questBtn').toggleAttribute('data-legend', q.legend);                // a small star: a famous place
   $('questLine').textContent = q.line;
   $('questDetail').textContent = q.detail;
   $('questBy').hidden = !q.byGemma;
+  basicLine = q.plain && !q.goal.done; syncBasic();                  // plain line: say so, when there is something better to turn on
   $('questCard').dataset.done = String(q.goal.done);                    // a celebrating card has no Gemma offer (CSS)
-  if (reveal && open !== 'stats' && !hintOpen) openCard('quest');
+  if (reveal && (open === null || open === 'quest') && !hintOpen) openCard('quest');   // never over another card someone is reading
 }
 
 // The Gemma switch in the panel, and the one-tap offer in the quest card. `note` says what it's doing ("800 MB download", "Downloading 40%"); not `usable`: this browser can't run it.
-export function showGemma(on: boolean, note: string, usable = true) {
+export function showGemma(on: boolean, note: string, usable = true, offer = '') {
   const sw = $('gemmaSwitch') as HTMLButtonElement;
   sw.hidden = false; sw.disabled = !usable;
   sw.setAttribute('aria-checked', String(on));
   sw.querySelector('.state')!.textContent = on ? 'On' : 'Off';
   $('gemmaNote').textContent = note;
   $('questGemma').hidden = on || !usable;                              // the card offers it only while it is off and possible
+  if (offer) $('questGemmaMb').textContent = offer;                     // its size here: the GPU model, or the smaller one for the processor
+  const pct = /(\d+)%/.exec(note);
+  $('questGemmaStatus').hidden = !(on && /^(Downloading|Loading)/.test(note));   // while it loads, the card says so (it is the thing the player pressed)
+  $('questGemmaStatus').textContent = pct ? `Gemma is getting ready · ${pct[1]}%` : 'Gemma is getting ready…';
+  syncBasic();
 }
 
-// At most one card is open: the panel under the button, or the quest card under the pill.
-type Card = 'stats' | 'quest' | null;
+let basicLine = false;                                                  // the quest card is showing a plain line (not Gemma's, not a finished quest)
+const syncBasic = () => { $('questBasic').hidden = !basicLine || $('questGemma').hidden; };   // "Basic hint" only where Gemma could be turned on
+
+// The badge button (bottom left) and its card: Explorer with a disc per level (gold and dated once earned, "7 of 10" while it is next), then Local legend and
+// Landmark: one each, earned at a famous place (its name and the day).
+// `hasNew`: a level earned that has not been looked at yet (a dot on the button).
+export interface BadgeView { count: number; earned: Record<string, string>; fame: Badges['fame']; hasNew: boolean }
+const niceDay = (d: string) => { const [y, m, day] = d.split('-').map(Number); return new Date(y, m - 1, day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+export function showBadges({ count, earned, fame, hasNew }: BadgeView) {
+  const have = BADGE_LEVELS.filter((l) => String(l) in earned).length + Object.keys(fame).length, all = BADGE_LEVELS.length + 2;
+  $('medal').hidden = false;                                            // only called when badges are on (not with ?quests=off)
+  $('medal').toggleAttribute('data-new', hasNew);
+  $('medal').setAttribute('aria-label', `Badges: ${have} of ${all}${hasNew ? ', new' : ''}`);
+  const row = (disc: Node | string, name: string, note: string, got: boolean) => {
+    const li = document.createElement('li'), d = document.createElement('span'), body = document.createElement('span');
+    const n = document.createElement('span'), m = document.createElement('span');
+    li.className = got ? 'got' : '';
+    d.className = 'badge-disc'; typeof disc === 'string' ? (d.textContent = disc) : d.append(disc);
+    n.className = 'badge-name'; n.textContent = name;
+    m.className = 'badge-note'; m.textContent = note;
+    body.className = 'badge-body'; body.append(n, m);
+    li.append(d, body);
+    return li;
+  };
+  const icon = (g: Group) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', '22'); s.setAttribute('height', '22');
+    s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2.2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = ICONS[g]; return s; };   // static markup from icons.ts: never a name
+  let nextShown = false;
+  const levels = BADGE_LEVELS.map((l) => {
+    const got = earned[String(l)];
+    const note = got ? `Earned ${niceDay(got)}` : !nextShown ? `${Math.min(count, l)} of ${l}` : 'Locked';
+    if (!got) nextShown = true;
+    return row(String(l), `Explorer ${l}`, note, !!got);
+  });
+  const legend = fame.legend, landmark = fame.landmark;
+  $('badgeLevels').replaceChildren(...levels,
+    row(icon('food'), FAME_LABEL.legend, legend ? `${legend.name} · ${niceDay(legend.day)}` : 'Be at a famous place to eat', !!legend),
+    row(icon('outdoors'), FAME_LABEL.landmark, landmark ? `${landmark.name} · ${niceDay(landmark.day)}` : 'Be at a famous landmark', !!landmark));
+}
+
+// At most one card is open: the panel under the button, the quest card under the pill, or the badges.
+type Card = 'stats' | 'quest' | 'badges' | null;
 let open: Card = null;
 function openCard(which: Card) {
   open = which;
   $('stats').hidden = which !== 'stats'; $('chip').setAttribute('aria-expanded', String(which === 'stats'));
   $('questCard').hidden = which !== 'quest'; $('questBtn').setAttribute('aria-expanded', String(which === 'quest'));
+  $('badgeCard').hidden = which !== 'badges'; $('medal').setAttribute('aria-expanded', String(which === 'badges'));
+  if (which === 'badges') onBadges();
   if (which === 'stats' && !opened) { opened = true; onOpened(); }
 }
 
@@ -97,10 +149,11 @@ export interface Controls {
   hintSeen: boolean; onHintSeen: () => void;
   openedSeen: boolean; onOpened: () => void;                            // the panel has been opened at least once
   onGemma: (on: boolean) => void;                                       // the Gemma switch (or the card's offer) was used
+  onBadges: () => void;                                                 // the badge card was opened: what is earned has been looked at
 }
 
 let hintOpen = false, onHintSeen = () => {};
-let opened = false, onOpened = () => {};
+let opened = false, onOpened = () => {}, onBadges = () => {};
 // What the first find ever adds to its message: a pointer to the button, for someone who has not opened it yet. Empty otherwise.
 export const nudge = (firstEver: boolean) => (firstEver && !opened ? 'Tap Today to see your progress' : '');
 // The first-open bubble goes away for good once the user taps anywhere or finds a place.
@@ -111,8 +164,9 @@ export function dismissHint() {
   onHintSeen();
 }
 
-export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, openedSeen, onOpened: markOpened, onGemma }: Controls) {
-  const chip = $('chip'), flag = $('questBtn'), sw = $('soundSwitch');
+export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, openedSeen, onOpened: markOpened, onGemma, onBadges: badgesLooked }: Controls) {
+  const chip = $('chip'), flag = $('questBtn'), sw = $('soundSwitch'), medal = $('medal');
+  onBadges = badgesLooked;
   // the four kinds of place, each with the same gold disc and icon as its pins on the map
   $('groups').replaceChildren(...GROUPS.map((g) => {
     const li = document.createElement('li');
@@ -129,12 +183,13 @@ export function init({ soundOn, onSound, onFocus, hintSeen, onHintSeen: seen, op
   showSound(soundOn);
   chip.onclick = () => openCard(open === 'stats' ? null : 'stats');
   flag.onclick = () => openCard(open === 'quest' ? null : 'quest');
+  medal.onclick = () => openCard(open === 'badges' ? null : 'badges');
   $('closeStats').onclick = () => { openCard(null); chip.focus({ preventScroll: true }); };
   sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; showSound(on); onSound(on); };
   $('gemmaSwitch').onclick = () => onGemma($('gemmaSwitch').getAttribute('aria-checked') !== 'true');
   $('questGemma').onclick = () => onGemma(true);
   $('lastFind').onclick = () => { openCard(null); chip.focus({ preventScroll: true }); if (lastPlace) onFocus(lastPlace); };   // the row is about to disappear: keep focus on the chip
-  const cardOf = { stats: [$('stats'), chip], quest: [$('questCard'), flag] } as const;
+  const cardOf = { stats: [$('stats'), chip], quest: [$('questCard'), flag], badges: [$('badgeCard'), medal] } as const;
   addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !open) return;
     const [card, button] = cardOf[open];
