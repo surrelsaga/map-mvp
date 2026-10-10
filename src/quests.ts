@@ -56,8 +56,12 @@ export function track(q: Reach, me: LatLng | null, now: number): Reach {
   return best === q.best && help === q.help && revealed === q.revealed ? q : { ...q, best, help, revealed };
 }
 
-// Which clue a reach quest is on: 1 the riddle, 2 once the wisp is out, 3 within QUEST_CLOSE_M of the spot.
-export const stage = (q: Reach, me: LatLng | null): 1 | 2 | 3 => (distanceTo(q, me) <= QUEST_CLOSE_M ? 3 : q.help ? 2 : 1);
+// Which clue a reach quest is on: 1 the riddle, 2 once the wisp is out, 3 within QUEST_CLOSE_M of the spot. Once you have been that close it stays 3 until
+// you are well away again (GPS jitter at the line must not flip the clue on every fix).
+export const stage = (q: Reach, me: LatLng | null): 1 | 2 | 3 => {
+  const d = distanceTo(q, me);
+  return d <= QUEST_CLOSE_M || (q.best <= QUEST_CLOSE_M && d <= QUEST_CLOSE_M * 1.7) ? 3 : q.help ? 2 : 1;
+};
 
 // Heading the wrong way: well over the distance you started from (half as far again, and at least QUEST_FAR_MIN_M more).
 export const tooFar = (q: Reach, d: number) => d > Math.max(q.start * QUEST_FAR_RATIO, q.start + QUEST_FAR_MIN_M);
@@ -84,8 +88,7 @@ export function goalOf(q: Quest, me: LatLng | null): Goal {
 export function parseQuest(raw: unknown): Quest | null {
   const q = raw as (Partial<Omit<Reach, 'kind'> & Omit<Find, 'kind'>> & { kind?: string }) | null;
   if (!q || typeof q !== 'object' || !Number.isSafeInteger(q.seq) || (q.seq as number) < 0 || typeof q.done !== 'boolean') return null;
-  const old = typeof (q as { text?: unknown }).text === 'string' ? [(q as { text: string }).text] : [];   // Phase 9 saved one line: it is the first clue
-  const given = Array.isArray(q.clues) ? q.clues : old;
+  const given = Array.isArray(q.clues) ? q.clues : [];                  // (a Phase 9 save had one `text`, worded with a direction: it is dropped, and new clues are written)
   const clues = given.length <= MAX_CLUES && given.every((c) => typeof c === 'string' && c.length <= MAX_TEXT) ? given : [];
   const base = { seq: q.seq as number, done: q.done, ...(clues.length ? { clues } : {}) };
   if (q.kind === 'find')

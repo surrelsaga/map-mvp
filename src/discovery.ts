@@ -15,7 +15,7 @@ import * as gemma from './gemma.ts';
 import * as badges from './badges.ts';
 import { toast } from './ui.ts';
 import * as regions from './region.ts';
-import { AREA_RADIUS, PLACES_RETRY_MS, PLACES_TIMEOUT_MS, QUEST_NEXT_MS, REANCHOR_M, REGION_RETRY_MS, GEMMA_TRIES } from './config.ts';
+import { AREA_RADIUS, PLACES_RETRY_MS, PLACES_TIMEOUT_MS, QUEST_NEXT_MS, REANCHOR_M, REGION_RETRY_MS, GEMMA_TRIES, TOAST_MS } from './config.ts';
 import type { Fix } from './types.ts';
 
 let placeList: places.Place[] = [];                  // the places of the current region
@@ -46,6 +46,12 @@ let writing = -1;                                   // the quest Gemma is writin
 let warned = false;                                 // the "heading away" alert has been given (again once you come back within the start distance)
 let badgeKey = '', badgeState = badges.empty();      // the Explorer badge: which levels are earned (stored), by the count of places this device has found
 const badgeView = (): hud.BadgeView => ({ count: everFound.size, earned: badgeState.earned, hasNew: badges.hasNew(badgeState) });
+let badgeShown = '';                                // what the badge card shows now: it is only redrawn when that changes (not with every step)
+function showBadges() {
+  const v = badgeView(), key = `${v.count}|${Object.keys(v.earned).join()}|${v.hasNew}`;
+  if (key === badgeShown) return;
+  badgeShown = key; hud.showBadges(v);
+}
 
 // The places found today, on the phone's local date: what this tab remembers plus whatever is stored (another tab may have counted too).
 // Counting which places, not how many, means the same place never counts twice, however many tabs find it. Asking also rolls over at midnight.
@@ -98,7 +104,7 @@ function showQuest(reveal = false) {
 // arrives. Until one answers (or if GEMMA_TRIES answers all fail the checks: '' is saved) the plain line shows.
 function writeClues(q: quests.Quest) {
   const want = q.kind === 'reach' ? 3 : 1;
-  if (q.done || writing === q.seq || !pos || (q.clues?.length ?? 0) >= want) return;
+  if (q.done || writing === q.seq || !pos || !gemma.isReady() || (q.clues?.length ?? 0) >= want) return;   // (no model: the plain lines need no writing)
   writing = q.seq;
   (async () => {
     for (let stage = ((q.clues?.length ?? 0) + 1) as questText.Stage; stage <= want; stage++) {
@@ -162,17 +168,19 @@ function settleQuest() {
 function trackQuest() {
   if (quest?.kind !== 'reach' || quest.done) return;
   const next = quests.track(quest, pos, Date.now());
+  const wasClose = stageOf(quest) === 3;
   if (next !== quest) {
     if (next.help && !quest.help) { toast('A wisp appeared', 'Follow its light'); buzz(120); }
     if (next.revealed && !quest.revealed) toast('The quest spot is on the map', 'Follow the flag');
     setQuest(next);
+    if (!wasClose && stageOf(next) === 3) buzz(150);                     // you are close now
   }
   if (pos) {
     const d = fog.dist(pos, next);
     if (!warned && quests.tooFar(next, d)) { warned = true; toast('Colder', 'Follow the light'); buzz(200); }
     else if (d <= next.start) warned = false;
   }
-  if (quest && stageOf(quest) !== shownStage) { if (stageOf(quest) === 3) buzz(150); showQuest(); }   // a new clue: shown (and opened) at once
+  if (quest && stageOf(quest) !== shownStage) { if (!wasClose && stageOf(quest) === 3) buzz(150); showQuest(); }   // a new clue: shown (and opened) at once
   else if (quest && quests.goalOf(quest, pos).label !== shownLabel) showQuest();   // the label is rounded to 10 m, so the pill changes only when it says something new
 }
 
@@ -216,9 +224,9 @@ function check() {
   if (got.fresh.length) {
     badgeState = got.badges; badges.write(badgeKey, badgeState);
     const level = Math.max(...got.fresh);
-    setTimeout(() => { toast('Badge earned', `Explorer · ${level} places`); sound.chime(); buzz(150); }, news.length ? 2400 : 0);
+    setTimeout(() => { toast('Badge earned', `Explorer · ${level} places`); sound.chime(); buzz(150); }, news.length ? TOAST_MS + 200 : 0);   // after the find's message has had its time
   }
-  if (badgeKey) hud.showBadges(badgeView());
+  if (badgeKey) showBadges();
   const finished = quest;
   if (questDone) setTimeout(() => { if (quest?.seq === finished?.seq) { setQuest(null); ensureQuest(); refresh(); } }, QUEST_NEXT_MS);   // the pill says "Done" for a moment, then the next quest starts
   refresh();
@@ -244,7 +252,7 @@ export function onMove(fix: Fix) {
 export function badgesSeen() {
   badgeState = { ...badgeState, seen: badges.highest(badgeState) };
   badges.write(badgeKey, badgeState);
-  hud.showBadges(badgeView());
+  showBadges();
 }
 
 // For the browser tests: the quest on screen right now (a copy).
@@ -345,7 +353,7 @@ export function start(seed: string, api: string, regionStoreKey: string, todaySt
   todayKey = todayStoreKey;
   questKey = questStoreKey ?? '';
   badgeKey = badgeStoreKey ?? ''; badgeState = badgeKey ? badges.read(badgeKey) : badges.empty();
-  if (badgeKey) hud.showBadges(badgeView());
+  if (badgeKey) showBadges();
   todayState = today.countToday(new Date(), [], today.readToday(todayKey));   // today's finds from earlier in the day, if the app was closed and reopened
   refresh();
   // An app left open overnight must start the new day: look again when it comes back to the foreground, and once a minute.

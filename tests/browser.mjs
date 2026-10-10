@@ -1400,7 +1400,7 @@ let q;
   q = await questState(open1);
   assert.deepEqual([q.kind, q.done, q.key], ['reach', false, reach.key], 'a saved open reach quest is back after a reload');
   assert.equal(await pinCount(open1), 1, 'with its marker (saved before hints, so already marked)'); assert.equal(await flag(open1), 'Reach the marked spot, 250 m');
-  assert.deepEqual(await card(open1), { line: reach.text, detail: '', gemma: true }, 'and the line Gemma wrote for it (a Phase 9 save: its first clue), credited');
+  assert.deepEqual(await card(open1), { line: 'A cafe is hiding in the fog nearby. Can you find it?', detail: '', gemma: false }, 'a Phase 9 save: its direction-worded line is dropped, and the plain first clue shows');
   await open1.close();
   const fresh = await open('', seeded(null, { ...reach, t: Date.now(), best: 250, revealed: false }), QUEST); await sleep(800);
   assert.deepEqual([await pinCount(fresh), await flag(fresh)], [0, 'Find the hidden spot, 250 m'], 'a quest still being looked for comes back hidden');

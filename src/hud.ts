@@ -39,7 +39,7 @@ export function showGoal(goal: Goal) {
 }
 
 // The quest pill (top right, with the quest's own ring) and its card: the line (Gemma's, or the plain one), then the detail.
-// `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over the stats panel,
+// `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over another card,
 // and not while the first-open bubble is up (the pill shows; the card opens on a tap).
 export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean }
 export function showQuest(q: QuestView | null, reveal = false) {
@@ -53,7 +53,7 @@ export function showQuest(q: QuestView | null, reveal = false) {
   $('questBy').hidden = !q.byGemma;
   basicLine = !q.byGemma && !q.goal.done; syncBasic();                  // plain line: say so, when there is something better to turn on
   $('questCard').dataset.done = String(q.goal.done);                    // a celebrating card has no Gemma offer (CSS)
-  if (reveal && open !== 'stats' && !hintOpen) openCard('quest');
+  if (reveal && (open === null || open === 'quest') && !hintOpen) openCard('quest');   // never over another card someone is reading
 }
 
 // The Gemma switch in the panel, and the one-tap offer in the quest card. `note` says what it's doing ("800 MB download", "Downloading 40%"); not `usable`: this browser can't run it.

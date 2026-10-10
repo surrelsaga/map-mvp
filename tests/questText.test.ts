@@ -65,5 +65,5 @@ assert.deepEqual(parseQuest({ ...q, clues: ['One.', '', 'Three.'] })?.clues, ['O
 assert.equal(parseQuest({ ...q, clues: [42] })?.clues, undefined);
 assert.equal(parseQuest({ ...q, clues: ['x'.repeat(201)] })?.clues, undefined);
 assert.equal(parseQuest({ ...q, clues: ['a', 'b', 'c', 'd'] })?.clues, undefined, 'at most three');
-assert.deepEqual(parseQuest({ ...q, text: 'Find them.' })?.clues, ['Find them.'], 'a Phase 9 save');
+assert.equal(parseQuest({ ...q, text: 'Head north-east.' })?.clues, undefined, 'a Phase 9 save: its direction-worded line is dropped');
 console.log('ok');

@@ -23,7 +23,9 @@ export function clear() { marker?.remove(); marker = null; }
 // The wisp: a small floating light that leads you once you have tried (the quest gives it, see quests.track). It sits just outside your cleared patch, on the
 // side the spot lies, with its tail back at you. Close to the spot it leaves your side and circles over the spot's area: an off-centre ring, not the exact point.
 // A light, not an arrow, and pale, not gold (gold means discovered).
-const OFFSET_PX = 64, AREA_M = 40, SHIFT_M = 15;   // 64 px: just outside the patch your steps clear, where a pale light shows against the fog
+const OFFSET_M = 62, AREA_M = 40, SHIFT_M = 15;   // 62 m: just outside the patch your steps clear, where a pale light shows against the fog
+const offsetPx = (lat: number) => Math.max(40, Math.min(110, OFFSET_M / ((40075017 * Math.cos((lat * Math.PI) / 180)) / (256 * 2 ** map.getZoom()))));   // that distance in pixels at this zoom, kept in a sensible range
+let turned = 0;                                                          // the wisp's rotation so far (degrees, not wrapped): it turns the short way, never the long way round
 const wispIcon = L.divIcon({                                             // colours are in style.css (.wisp ...): one source of truth for the palette
   className: 'wisp', iconSize: [48, 48], iconAnchor: [24, 18],
   html: '<div class="wisp-turn"><div class="wisp-drift"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">'
@@ -44,13 +46,18 @@ export function setWisp(w: Wisp | null) {
     const a = ((w.seq * 137) % 360) * Math.PI / 180, lat = w.target.lat + (SHIFT_M * Math.cos(a)) / 111195;
     at = L.latLng(lat, w.target.lng + (SHIFT_M * Math.sin(a)) / (111195 * Math.cos((lat * Math.PI) / 180)));
   } else {
-    const r = (b * Math.PI) / 180, p = map.latLngToLayerPoint([w.me.lat, w.me.lng]).add([Math.sin(r) * OFFSET_PX, -Math.cos(r) * OFFSET_PX]);
+    const r = (b * Math.PI) / 180, p = map.latLngToLayerPoint([w.me.lat, w.me.lng]).add([Math.sin(r) * offsetPx(w.me.lat), -Math.cos(r) * offsetPx(w.me.lat)]);
     at = map.layerPointToLatLng(p);
   }
   if (!wisp) wisp = L.marker(at, { icon: wispIcon, pane: 'wisp', interactive: false, keyboard: false }).addTo(map);
   else wisp.setLatLng(at);
   const el = wisp.getElement();
-  if (el) { el.classList.toggle('is-close', w.close); (el.querySelector('.wisp-turn') as HTMLElement).style.transform = `rotate(${w.close ? 0 : Math.round(b)}deg)`; }
+  if (el) {
+    const want = w.close ? 0 : b, delta = ((((want - (turned % 360)) % 360) + 540) % 360) - 180;   // the shortest way round, -180..180
+    turned += delta;
+    el.classList.toggle('is-close', w.close);
+    (el.querySelector('.wisp-turn') as HTMLElement).style.transform = `rotate(${Math.round(turned)}deg)`;
+  }
   if (w.close) {
     if (!area) area = L.circle(at, { radius: AREA_M, pane: 'wisp', interactive: false, className: 'wisp-area', weight: 2, dashArray: '4 8', fill: false }).addTo(map);
     else area.setLatLng(at);
