@@ -22,8 +22,15 @@ export const SAVE_DELAY_MS = 2000;        // newly cleared cells are written to 
 export const STORE_KEY = 'fogwalk:v1';    // bump the version when the stored format or the grid (fog.key) changes; storage.ts adds CELL, and ':debug' in debug mode
 
 // Places
-export const AREA_RADIUS = 2000;          // metres around SUTD: the neighbourhood that "% explored" is measured against (same as tools/fetch-places.mjs)
+export const AREA_RADIUS = 2000;          // metres: the radius of every region (what server/places.ts asks Overpass for, and what "% explored" is measured against); tools/fetch-places.mjs uses it for SUTD
 export const TOAST_MS = 4000;             // how long a "Found: ..." message stays up
+export const REGION_ROUND = 0.005;        // degrees (~550 m): a region's centre is the fix rounded to this grid. It is also all the server is ever told about where you are
+export const REANCHOR_M = 1500;           // walk further than this from the region's centre and a new region is loaded around you (the loaded circle is AREA_RADIUS, so 500 m of places always lie ahead)
+export const REGION_KEEP = 3;             // regions kept on the phone, most recent first
+export const REGION_RETRY_MS = 60_000;    // after a failed load, wait this long before asking again
+export const REGION_MAX_CHARS = 1_000_000;   // stored regions never take more than this of localStorage's ~5 MB (some browsers count 2 bytes per character), so the fog (fogwalk:v1) always has room; one dense city centre (~0.85 MB) still fits
+export const REGION_KEY = 'fogwalk:regions:v1';   // the kept regions; debug mode adds ':debug'
+export const PLACES_TIMEOUT_MS = 150_000;   // a places-service request that takes longer is a failure (the service may try three Overpass servers in turn, 45 s each)
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
 
 // Look and feel
@@ -35,4 +42,27 @@ export const CHIME_HZ = [659, 880];       // the "found" chime: E5, then A5
 // Today's goal and the first-open hint
 export const DAILY_GOAL = 3;              // new places to find per day: the goal the chip's ring fills toward (quests will take over this slot)
 export const TODAY_KEY = 'fogwalk:today'; // per-device count of today's finds; debug mode adds ':debug'
-export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open hint has been dismissed
+export const FOUND_KEY = 'fogwalk:found:v1';   // every place this device has found (their keys), wherever the fog came from; debug mode adds ':debug'
+export const FOUND_MAX = 5_000;           // bounds what that list, or a damaged value, can cost (a place key is ~16 characters: about 100 KB at most)
+export const HINT_KEY = 'fogwalk:hinted'; // set once the first-open bubble has been dismissed
+export const OPENED_KEY = 'fogwalk:opened'; // set once the Today panel has been opened
+
+// Quests (two simple ones, no AI: reach a marked spot, then find new places; they alternate)
+export const QUEST_MIN_M = 150;           // a reach quest picks an unfound place at least this far away...
+export const QUEST_MAX_M = 400;           // ...and at most this far (the nearest unfound place if none is in between)
+export const QUEST_FIND = 2;              // new places a find quest asks for
+export const QUEST_NEXT_MS = 5000;        // how long a finished quest stays on the chip before the next one starts
+export const QUEST_KEY = 'fogwalk:quest'; // per-device quest state; debug mode adds ':debug'
+export const QUEST_REVEAL_MS = 5 * 60_000; // a reach quest's spot starts hidden (only the hint); after this long looking, it is marked on the map
+export const QUEST_PAST_M = 60;           // ...or sooner: you got this much closer, then drifted this far back out (walked past it, or lost)
+export const QUEST_FAR_RATIO = 1.5;       // "heading away" alert: you are this many times the starting distance away...
+export const QUEST_FAR_MIN_M = 100;       // ...and at least this much further than at the start (a 150 m quest doesn't nag at 230 m)
+export const CROWD_PX = 22;               // found-place pins closer than this on screen are a crowd: only the newest of them shows (zoom in for the rest)
+
+// Gemma writes the quest line (opt-in: the model downloads once from Hugging Face, then runs on the phone's GPU; nothing about you is sent)
+export const GEMMA_MODEL = 'onnx-community/gemma-3-1b-it-ONNX-GQA';   // Gemma 3 1B, ~800 MB. The 270M model (~300 MB) was tried: it mostly copies the prompt's examples
+export const GEMMA_MB = 800;              // the download size the switch shows before it is turned on
+export const GEMMA_KEY = 'fogwalk:gemma'; // set once the user has turned Gemma on (it then loads from the browser's cache on every visit)
+export const GEMMA_TRIES = 5;             // answers Gemma may give for one quest line before the plain line stays (about 1 s each)
+export const HERE_M = 100;                // a place found this close to you is "where you are" in the quest line
+export const LINE_MAX = 120;              // characters: a quest line longer than this is cut at a sentence end, or not used

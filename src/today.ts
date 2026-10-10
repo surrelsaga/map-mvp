@@ -1,9 +1,9 @@
 // Today's goal: how many new places have been found today. The pure helpers need no browser; the small store keeps the count on this device.
-// The chip's ring shows exactly one goal. For now it is this one; quests will later take over the same slot with a goal of their own.
-import { DAILY_GOAL, TODAY_KEY } from './config.ts';
+// The Today button's ring shows this goal. (quests.ts builds a Goal of the same shape, for the AI quests later.)
+import { DAILY_GOAL, TODAY_KEY, FOUND_KEY, FOUND_MAX } from './config.ts';
 
 export interface Today { date: string; ids: string[] }              // which places were found today (by key), so the same place can never count twice
-export interface Goal { found: number; target: number; done: boolean; progress: number; label: string }
+export interface Goal { title: string; found: number; target: number; done: boolean; progress: number; label: string; detail: string }   // label = the chip's text, detail = the line in the card
 
 // The phone's local date, "2026-10-09": the goal resets when it changes.
 export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -24,9 +24,10 @@ export function countToday(now: Date, add: string[], ...saved: unknown[]): Today
 export function goalOf(found: number, target: number = DAILY_GOAL): Goal {
   const done = found >= target;
   return {
-    found, target, done,
+    title: 'Today', found, target, done,
     progress: Math.min(1, found / target),
     label: done ? 'Today’s goal done' : found === 0 ? `Find ${target} places today` : `${found} of ${target} places today`,
+    detail: done ? 'All done. More finds are a bonus.' : `${found} of ${target} new places, ${target - found} to go`,
   };
 }
 
@@ -38,3 +39,21 @@ export function writeToday(key: string, value: Today) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not remembered */ }
 }
 export const todayStoreKey = (debug: boolean) => TODAY_KEY + (debug ? ':debug' : '');
+
+// Every place this device has ever found (their keys). A find is new exactly when it is not in here, wherever the fog under it came from:
+// fog cleared while no places were loaded (service down, asleep or slow) is still unclaimed until the places arrive.
+// Untrusted when read: anything that is not a list of short strings gives nothing; the newest FOUND_MAX stay.
+export function parseFound(raw: unknown): string[] {
+  const ids = (raw as { ids?: unknown } | null)?.ids;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string' && x.length <= 120).slice(-FOUND_MAX) : [];
+}
+export function hasFound(key: string): boolean {
+  try { return localStorage.getItem(key) !== null; } catch { return true; }   // storage that throws cannot be told apart from a first run: treat it as not a first run
+}
+export function readFound(key: string): string[] {
+  try { return parseFound(JSON.parse(localStorage.getItem(key) ?? 'null')); } catch { return []; }
+}
+export function writeFound(key: string, ids: Iterable<string>) {
+  try { localStorage.setItem(key, JSON.stringify({ ids: [...new Set(ids)].slice(-FOUND_MAX) })); } catch { /* not remembered */ }
+}
+export const foundStoreKey = (debug: boolean) => FOUND_KEY + (debug ? ':debug' : '');

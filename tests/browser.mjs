@@ -4,6 +4,7 @@
 // Env: CHROME=/path/to/chrome   SHOTS=/some/dir (also saves screenshots)
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert';
+import { cellOf, key as cellKey } from '../src/fog.ts';
 
 const BASE = process.argv[2] || 'http://localhost:3000/';
 const ORIGIN = new URL(BASE).origin;
@@ -11,7 +12,8 @@ const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/M
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
 const errors = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const open = async (query = '', setup, { permit = true, ctx: shared, days = 0 } = {}) => {
+const open = async (query = '', setup, { permit = true, ctx: shared, days = 0, quests = false, hint = false } = {}) => {
+  if (!quests) query += (query ? '&' : '?') + 'quests=off';      // the earlier phases test the plain map and today's goal; only the quest section turns quests on
   const ctx = shared ?? await browser.createBrowserContext();   // fresh context = fresh localStorage; pass one in to act as the same device (shared storage)
   if (permit && !shared) await ctx.overridePermissions(ORIGIN, ['geolocation']);
   const page = await ctx.newPage();
@@ -27,6 +29,7 @@ const open = async (query = '', setup, { permit = true, ctx: shared, days = 0 } 
       if (t !== prev) { prev = t; if (t) seen.push(t); }
     }).observe(document, { childList: true, subtree: true, characterData: true });
   });
+  if (quests && !hint) await page.evaluateOnNewDocument(() => { localStorage.setItem('fogwalk:hinted', '1'); localStorage.setItem('fogwalk:opened', '1'); });   // a device that has seen the first-open bubble and the panel: the bubble would hold a new quest's card back (a test about it asks with `hint`), and the first find's message would point at the button
   if (days) await page.evaluateOnNewDocument((shift) => {        // the phone's clock, `days` ahead: for "a new day" without waiting for one
     const Real = Date, ms = shift * 86400000;
     window.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + ms); } static now() { return Real.now() + ms; } };
@@ -308,13 +311,13 @@ console.log('Phase 3: saved progress');
 }
 { // two tabs on one device: one can't wipe the other's progress
   const ctx = await browser.createBrowserContext(); await ctx.overridePermissions(ORIGIN, ['geolocation']);
-  const mk = async () => { const p = await ctx.newPage(); p.on('pageerror', (e) => errors.push(e.message)); await p.setViewport({ width: 390, height: 780, isMobile: true, hasTouch: true }); await captureFix(p); await p.goto(BASE, { waitUntil: 'networkidle2' }); return p; };
+  const mk = async () => { const p = await ctx.newPage(); p.on('pageerror', (e) => errors.push(e.message)); await p.setViewport({ width: 390, height: 780, isMobile: true, hasTouch: true }); await captureFix(p); await p.goto(BASE + '?quests=off', { waitUntil: 'networkidle2' }); return p; };
   const a = await mk(), b = await mk();                            // both start with nothing saved
   await a.evaluate(() => window.__fix({ coords: { latitude: 1.36, longitude: 103.98, accuracy: 20 } }));
   await a.evaluate(() => dispatchEvent(new Event('pagehide')));
   await b.evaluate(() => window.__fix({ coords: { latitude: 1.37, longitude: 103.99, accuracy: 20 } }));
   await b.evaluate(() => dispatchEvent(new Event('pagehide')));
-  const merged = JSON.parse(await ls(a, REAL)).keys;
+  const merged = JSON.parse(await ls(b, REAL)).keys;                // read from the tab that wrote last: another tab's localStorage view lags by a moment in Chrome, so tab a can still show its own 44
   const [na, nb] = [await count(a), await count(b)];
   assert(merged.length >= na + nb - 2, `the later tab's save kept the other tab's cells (${merged.length} stored, ${na} + ${nb} in memory)`);
   await ctx.close(); t('two tabs merge ok');
@@ -361,7 +364,8 @@ const fakePlaces = (body, status = 200, delay = 0) => async (p) => {
 };
 const S0 = { lat: 1.3413, lng: 103.9638 };
 const pins = (p) => p.evaluate(() => [...document.querySelectorAll('.place-pin')].map((e) => e.title));
-const stats = (p) => p.evaluate(() => ({ chip: document.getElementById('chipText').textContent, places: document.getElementById('statsPlaces').textContent, area: document.getElementById('statsArea').textContent, last: document.getElementById('statsLast').textContent }));
+const goalLabel = (name) => { const m = /^Today: (\d+) of (\d+) places\./.exec(name); return !m ? 'Today’s goal done' : +m[1] === 0 ? `Find ${m[2]} places today` : `${m[1]} of ${m[2]} places today`; };   // the button says "Today"; the numbers are in its spoken name
+const stats = (p) => p.evaluate(() => ({ chip: document.getElementById('chip').getAttribute('aria-label'), places: document.getElementById('statsPlaces').textContent, area: document.getElementById('statsArea').textContent, last: document.getElementById('statsLast').textContent })).then((s) => ({ ...s, chip: goalLabel(s.chip) }));
 const toasts = (p) => p.evaluate(() => window.__toasts ?? []);
 const toastText = (p) => p.evaluate(() => document.getElementById('toast').classList.contains('show') ? document.getElementById('toastTitle').textContent : null);
 const waitFor = async (fn, ms = 12000) => { for (let i = 0; i < ms / 100; i++) { if (await fn()) return true; await sleep(100); } return false; };
@@ -523,9 +527,24 @@ console.log('Phase 5: look and feel');
   assert(await p.evaluate(() => document.fonts.check('700 16px "Atkinson Hyperlegible Next"') && document.fonts.check('400 16px "Atkinson Hyperlegible Next"')), 'the self-hosted font is loaded');
   assert.match(await p.evaluate(() => getComputedStyle(document.getElementById('chip')).fontFamily), /Atkinson Hyperlegible Next/);
   const named = async (sel) => { const h = await p.$(sel); const n = await p.accessibility.snapshot({ root: h }); return n && { role: n.role, name: n.name, checked: n.checked }; };
-  assert.deepEqual(await named('#chip'), { role: 'button', name: 'Find 3 places today, progress details', checked: undefined }, 'the chip is named by what it says, plus what a tap gives');
+  // what the button and the panel say: one word on the button (the gear says "settings"), two headings in the panel, and a close button
+  assert.equal(await p.evaluate(() => document.getElementById('chipText').textContent), 'Today', 'the button says Today');
+  assert.equal(await p.evaluate(() => document.querySelector('#chip .gear').getAttribute('aria-hidden')), 'true', 'and the gear is decoration (the spoken name already says "settings")');
   await p.click('#chip');
-  assert.equal((await named('#chip')).name, 'Find 3 places today, progress details', 'and keeps it while the card is open');
+  assert.deepEqual(await p.evaluate(() => [...document.querySelectorAll('#stats h2')].map((h) => h.textContent)), ['Today', 'Settings'], 'the panel has two headed sections');
+  assert.equal(await p.evaluate(() => document.getElementById('stats').getAttribute('aria-labelledby')), 'statsTitle');
+  const x = await named('#closeStats');
+  assert.deepEqual(x, { role: 'button', name: 'Close', checked: undefined }, 'the close button is named');
+  const xs = await p.evaluate(() => document.getElementById('closeStats').getBoundingClientRect().toJSON());
+  assert(xs.width >= 44 && xs.height >= 44, `and is at least 44 px (${xs.width}x${xs.height})`);
+  const room = await p.evaluate(() => { const b = document.getElementById('closeStats').getBoundingClientRect(), c = document.getElementById('stats').getBoundingClientRect(); return { right: c.right - b.right, top: b.top - c.top }; });
+  assert(room.right >= 8 && room.top >= 8, `and the panel leaves room for its focus ring, which would otherwise be cut off (${JSON.stringify(room)})`);
+  await p.click('#closeStats');
+  assert.deepEqual(await open_(), { hidden: true, expanded: 'false' }, 'it closes the panel');
+  assert.equal(await p.evaluate(() => document.activeElement.id), 'chip', 'and focus goes back to the button');
+  assert.deepEqual(await named('#chip'), { role: 'button', name: 'Today: 0 of 3 places. Progress and settings', checked: undefined }, 'the button is named by today\'s count, plus what a tap gives');
+  await p.click('#chip');
+  assert.equal((await named('#chip')).name, 'Today: 0 of 3 places. Progress and settings', 'and keeps it while the panel is open');
   await p.click('#chip');
   await p.click('#chip');
   assert.deepEqual(await named('#soundSwitch'), { role: 'switch', name: 'Sound', checked: true }, 'the switch is named "Sound" and its state comes from aria-checked');
@@ -735,25 +754,25 @@ console.log('Phase 5: look and feel');
 console.log('Phase 5b: stats block');
 const ringOffset = (p) => p.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#chip .ring-arc')).strokeDashoffset));
 const RING = 1;                                                                     // the arc is a circle of length 1 (pathLength): an empty ring is offset by all of it
-const chipState = (p) => p.evaluate(() => ({ text: document.getElementById('chipText').textContent, name: document.getElementById('chip').getAttribute('aria-label'), done: document.querySelector('#chip .ring').classList.contains('done') }));
+const chipState = (p) => p.evaluate(() => ({ text: document.getElementById('chipText').textContent, name: document.getElementById('chip').getAttribute('aria-label'), done: document.querySelector('#chip .ring').classList.contains('done') })).then((c) => ({ ...c, button: c.text, text: goalLabel(c.name) }));   // text = the goal's wording (from the spoken name); button = the word on the button
 const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOffset(p)) - RING * (1 - progress)) < 0.01, 3000);
 { // the chip says what it is; the ring fills toward today's goal; the find that completes it says so
   const places = [0, 300, 600, 900].map((n, i) => ({ name: `Spot ${i}`, type: 'cafe', lat: S0.lat + dN(n), lng: S0.lng }));
   const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }); await sleep(800);
   const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
   const detail = () => p.evaluate(() => document.getElementById('toastDetail').textContent);
-  assert.deepEqual(await chipState(p), { text: 'Find 3 places today', name: 'Find 3 places today, progress details', done: false }, 'before any find: an instruction, not a number');
+  assert.deepEqual(await chipState(p), { button: 'Today', text: 'Find 3 places today', name: 'Today: 0 of 3 places. Progress and settings', done: false }, 'the button says Today, and its spoken name has the numbers');
   assert.deepEqual(await p.evaluate(() => { const a = document.querySelector('#chip .ring-arc'), cs = getComputedStyle(a); return [a.tagName.toLowerCase(), a.getAttribute('pathLength'), cs.strokeDasharray, cs.transitionProperty]; }), ['path', '1', '1px', 'stroke-dashoffset, opacity'], 'the arc is a <path> of length 1 (not a <circle>, whose pathLength Safari may ignore) and eases both its sweep and its fade');
   assert(await ringAt(p, 0), 'the ring starts empty');
   assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .ring-arc')).opacity), '0', 'and draws nothing at all (a round cap would leave a gold speck)');
   await fixAt(0); await sleep(400);
-  assert.deepEqual(await chipState(p), { text: '1 of 3 places today', name: '1 of 3 places today, progress details', done: false });
-  assert(await ringAt(p, 1 / 3), 'a third of the way round'); assert.equal(await detail(), 'Cafe');
+  assert.deepEqual(await chipState(p), { button: 'Today', text: '1 of 3 places today', name: 'Today: 1 of 3 places. Progress and settings', done: false });
+  assert(await ringAt(p, 1 / 3), 'a third of the way round'); assert.equal(await detail(), 'Tap Today to see your progress', 'the very first find points at the button');
   assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .ring-arc')).opacity), '1', 'and the arc shows');
   await fixAt(300); await sleep(400);
-  assert.equal((await chipState(p)).text, '2 of 3 places today'); assert(await ringAt(p, 2 / 3), 'two thirds');
+  assert.equal((await chipState(p)).text, '2 of 3 places today'); assert(await ringAt(p, 2 / 3), 'two thirds'); assert.equal(await detail(), 'Cafe', 'and only the first find has the pointer');
   await fixAt(600); await sleep(400);
-  assert.deepEqual(await chipState(p), { text: 'Today’s goal done', name: 'Today’s goal done, progress details', done: true }, 'the third find completes the goal');
+  assert.deepEqual(await chipState(p), { button: 'Today', text: 'Today’s goal done', name: 'Today’s goal done. Progress and settings', done: true }, 'the third find completes the goal');
   assert(await ringAt(p, 1), 'the ring is full'); assert.equal(await detail(), 'Today’s goal done', 'and the find message says so');
   await fixAt(900); await sleep(400);
   assert.equal((await chipState(p)).text, 'Today’s goal done', 'more finds stay done'); assert.equal(await detail(), 'Cafe', 'and the goal message is not repeated'); assert(await ringAt(p, 1));
@@ -763,7 +782,7 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   const p = await open('?debug', fakePlaces({ places: [] })); await sleep(500);
   const hint = () => p.evaluate(() => ({ hidden: document.getElementById('hint').hidden, flag: localStorage.getItem('fogwalk:hinted') }));
   assert.deepEqual(await hint(), { hidden: false, flag: null }, 'a first visit shows the hint');
-  assert.match(await p.evaluate(() => document.getElementById('hint').textContent), /Walk to clear the fog/);
+  assert.equal(await p.evaluate(() => document.getElementById('hint').textContent), 'Walk to clear the fog. Your progress and settings are here.', 'the bubble says what to do, and where the button leads');
   await p.mouse.click(300, 600); await sleep(200);
   assert.deepEqual(await hint(), { hidden: true, flag: '1' }, 'a tap dismisses it for good');
   await p.reload({ waitUntil: 'networkidle2' });
@@ -774,6 +793,43 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   await q.evaluate(() => window.__fix({ coords: { latitude: 1.3413, longitude: 103.9638, accuracy: 20 } })); await sleep(300);
   assert.deepEqual(await q.evaluate(() => [document.getElementById('hint').hidden, localStorage.getItem('fogwalk:hinted')]), [true, '1'], 'the first find dismisses it without any tap');
   await q.close(); t('first-open hint ok');
+}
+{ // the panel before any find says what to do; the first find points at the button, once, and not at someone who has already opened it
+  const at = (n) => ({ latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const places = [0, 300].map((n, i) => ({ name: `Spot ${i}`, type: 'cafe', lat: S0.lat + dN(n), lng: S0.lng }));
+  const setup = async (p) => { await captureFix(p); await fakePlaces({ places })(p); };
+  const detail = (p) => p.evaluate(() => document.getElementById('toastDetail').textContent);
+  const flags = (p) => p.evaluate(() => ({ opened: localStorage.getItem('fogwalk:opened') }));
+  // someone who never opens the panel
+  const dev = await browser.createBrowserContext(); await dev.overridePermissions(ORIGIN, ['geolocation']);
+  const a = await open('', setup, { ctx: dev }); await sleep(500);
+  assert.deepEqual(await flags(a), { opened: null });
+  await a.click('#chip'); await sleep(200);
+  assert.equal(await a.evaluate(() => [document.getElementById('emptyHint').hidden, document.getElementById('progress').hidden]).then((x) => x.join()), 'false,true', 'before any find: a line saying what to do, and no rows of zeros');
+  assert.match(await a.evaluate(() => document.getElementById('emptyHint').textContent), /Walk to clear the fog/);
+  assert.match(await a.evaluate(() => document.getElementById('statsArea').textContent), /^0\.00% of the neighbourhood$/, 'the explored share shows from the start');
+  assert(await a.evaluate(() => document.getElementById('statsArea').getBoundingClientRect().height > 0 && document.getElementById('areaBar').parentElement.getBoundingClientRect().height > 0), 'with its bar');
+  assert.equal((await flags(a)).opened, '1', 'opening the panel is remembered');
+  await a.click('#closeStats'); await a.close();
+  // someone who has opened it: the first find does not point at it
+  const b = await open('', setup, { ctx: dev }); await sleep(500);
+  await b.evaluate((c) => window.__fix({ coords: c }), at(0)); await sleep(300);
+  assert.equal(await detail(b), 'Cafe', 'a find after the panel was opened has no pointer');
+  assert.equal(await b.evaluate(() => [document.getElementById('emptyHint').hidden, document.getElementById('progress').hidden].join()), 'true,false', 'with a find, the rows replace the empty-state line');
+  await b.close(); await dev.close();
+  // someone who has not: the pointer comes once, on the first find, and is remembered
+  const dev2 = await browser.createBrowserContext(); await dev2.overridePermissions(ORIGIN, ['geolocation']);
+  const c = await open('', setup, { ctx: dev2 }); await sleep(500);
+  await c.evaluate((x) => window.__fix({ coords: x }), at(0)); await sleep(300);
+  assert.equal(await detail(c), 'Tap Today to see your progress', 'the first find ever points at the button');
+  await c.evaluate((x) => window.__fix({ coords: x }), at(300)); await sleep(300);
+  assert.equal(await detail(c), 'Cafe', 'the second find does not');
+  await c.close();
+  const d = await open('', setup, { ctx: dev2 }); await sleep(500);
+  await d.evaluate((x) => window.__fix({ coords: x }), at(0)); await sleep(300);
+  assert.deepEqual(await d.evaluate(() => window.__toasts), [], 'a find from an earlier visit is quiet, so the pointer is not wasted or repeated');
+  await d.close(); await dev2.close();
+  t('empty state and first-find pointer ok');
 }
 { // today's count: places restored from an earlier visit don't count again; a new day starts from zero
   const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
@@ -803,7 +859,7 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   assert.equal((await chipState(second)).text, '2 of 3 places today', 'and only the new place is added to today (the old one is not counted again)');
   await second.close(); await device.close(); t('old and new in one batch: only the new counts');
 }
-{ // the card: a row per kind of place with its own icon and bar, the area bar, and numbers beside every bar
+{ // the panel: the four kinds of place two by two, each with its own icon and its count; the area bar with its number
   const at = (n, e) => ({ lat: S0.lat + dN(n), lng: S0.lng + dE(e) });
   const places = [
     { name: 'Noodles', type: 'fast_food', ...at(26, 0) }, { name: 'Soup', type: 'restaurant', ...at(-26, 0) }, { name: 'Corner Shop', type: 'convenience', ...at(0, 26) },
@@ -811,18 +867,18 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
     ...Array.from({ length: 98 }, (_, i) => ({ name: `Stall ${i}`, type: 'food_court', ...at(i / 8, i / 8) })),     // ninety-eight more to find, so the food count is three digits wide
   ];
   const scale = (t) => parseFloat(t.match(/scaleX\(([\d.]+)\)/)?.[1] ?? 'NaN');
-  const readRows = (p) => p.evaluate(() => [...document.querySelectorAll('#groups li')].map((li) => ({ group: li.dataset.group, name: li.querySelector('.g-name').textContent, count: li.querySelector('.g-count').textContent, bar: li.querySelector('.bar > span').style.transform, icon: !!li.querySelector('.place-disc svg path') })));
+  const readRows = (p) => p.evaluate(() => [...document.querySelectorAll('#groups li')].map((li) => ({ group: li.dataset.group, name: li.querySelector('.g-name').textContent, count: li.querySelector('.g-count').textContent, icon: !!li.querySelector('.place-disc svg path'), box: li.getBoundingClientRect().toJSON() })));
   const p = await open('?debug', fakePlaces({ places })); await sleep(800);
   await p.click('#chip'); await sleep(900);
   const rows = await readRows(p);
-  assert.deepEqual(rows.map((r) => [r.group, r.name, r.count]), [['food', 'Food & drink', '100 of 101'], ['shop', 'Shops', '1 of 1'], ['outdoors', 'Outdoors', '1 of 1'], ['other', 'Other', '1 of 1']], 'one row per kind: found of total');
-  assert(rows.every((r) => r.icon), 'each row has its pin icon');
-  assert(Math.abs(scale(rows[0].bar) - 100 / 101) < 0.01 && rows.slice(1).every((r) => scale(r.bar) === 1), `bars show the share found (${rows.map((r) => r.bar)})`);
-  const widths = await p.evaluate(() => [...document.querySelectorAll('#groups .bar')].map((b) => Math.round(b.getBoundingClientRect().width * 10) / 10));
-  assert(widths.every((w) => w === widths[0]) && widths[0] > 100, `every bar has the same length, whatever its count says (${widths})`);
+  assert.deepEqual(rows.map((r) => [r.group, r.name, r.count]), [['food', 'Food & drink', '100 of 101'], ['shop', 'Shops', '1 of 1'], ['outdoors', 'Outdoors', '1 of 1'], ['other', 'Other', '1 of 1']], 'one cell per kind: found of total');
+  assert(rows.every((r) => r.icon), 'each cell has its pin icon');
+  assert(Math.abs(rows[0].box.top - rows[1].box.top) < 1 && Math.abs(rows[2].box.top - rows[3].box.top) < 1 && rows[2].box.top > rows[0].box.bottom - 1, 'two rows of two');
+  assert(rows[1].box.left > rows[0].box.right - 1 && Math.abs(rows[0].box.left - rows[2].box.left) < 1, 'in two columns');
+  assert.equal(await p.evaluate(() => document.querySelectorAll('#groups .bar').length), 0, 'and no bar per kind: the area bar is the only one');
   assert.equal((await stats(p)).places, '103 of 104 places found');
-  const roomy = await p.evaluate(() => ({ heading: getComputedStyle(document.getElementById('statsPlaces')).marginBottom, area: getComputedStyle(document.getElementById('statsArea')).marginBottom, overflow: [...document.querySelectorAll('.g-count')].some((c) => c.scrollWidth > c.clientWidth + 1) }));
-  assert.deepEqual(roomy, { heading: '12px', area: '8px', overflow: false }, 'the card keeps its spacing (a more specific rule once removed it) and a three-digit count fits');
+  const roomy = await p.evaluate(() => ({ heading: getComputedStyle(document.getElementById('statsPlaces')).marginTop, area: getComputedStyle(document.getElementById('statsArea')).marginBottom, overflow: [...document.querySelectorAll('.g-count')].some((c) => c.scrollWidth > c.clientWidth + 1) }));
+  assert.deepEqual(roomy, { heading: '16px', area: '8px', overflow: false }, 'the panel keeps its spacing (a more specific rule once removed it) and a three-digit count fits');
   assert.match((await stats(p)).area, /^\d\.\d\d% of the neighbourhood$/);
   assert(scale(await p.evaluate(() => document.getElementById('areaBar').style.transform)) >= 0.05, 'the area bar is never invisible once something is explored');
   await shot(p, 'card');
@@ -831,8 +887,8 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   await none.click('#chip'); await sleep(900);
   const empty = await readRows(none);
   assert.deepEqual(empty.map((r) => r.count), ['0 of 1', '0 of 0', '0 of 1', '0 of 0'], 'nothing found: zeros');
-  assert(empty.every((r) => scale(r.bar) === 0), 'and empty bars, not stubs');
-  await none.close(); t('card rows, bars and area ok');
+  assert.equal(await none.evaluate(() => document.getElementById('progress').hidden), true, 'but they are not shown: the panel says what to do instead');
+  await none.close(); t('panel kinds, area bar ok');
 }
 { // "Last": tap it and the map goes to that place and opens its name
   const places = [{ name: 'Right Here', type: 'fast_food', lat: S0.lat + dN(10), lng: S0.lng }];
@@ -852,7 +908,7 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   assert.equal(await before.evaluate(() => document.getElementById('lastFind').hidden), true, 'with nothing found yet there is no "Last" row');
   await before.close(); t('last find opens its place ok');
 }
-{ // it looks pressable and says so: a visible edge, a tint on press without moving, a chevron that turns, targets 48 px or more
+{ // it looks pressable and says so: a visible edge, a tint on press without moving, a gear, targets 48 px or more
   const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
   const p = await open('?debug', fakePlaces({ places })); await sleep(800);
   const edge = await p.evaluate(() => { const cs = getComputedStyle(document.getElementById('chip')); return { width: cs.borderTopWidth, color: cs.borderTopColor, radius: cs.borderTopLeftRadius }; });
@@ -870,20 +926,19 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   const keyed = await p.evaluate(() => { const cs = getComputedStyle(document.getElementById('chip')); return { band: cs.boxShadow, tint: cs.backgroundImage }; });
   assert(/rgb\(238, 243, 248\)/.test(keyed.band) && /rgba\(238, 243, 248, 0\.12\)/.test(keyed.tint), `while a key is held the chip is tinted and still has its focus band (${JSON.stringify(keyed)})`);
   await p.keyboard.up('Space'); await sleep(400);
-  assert.notEqual(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .chev')).transform), 'none', 'the chevron has turned over: the card is open');
+  assert.notEqual(await p.evaluate(() => getComputedStyle(document.getElementById('chip')).backgroundImage), 'none', 'the button is tinted while the panel is open');
   assert.equal(await p.evaluate(() => [document.getElementById('chip').getAttribute('aria-expanded'), document.getElementById('stats').hidden].join()), 'true,false');
   const sizes = await p.evaluate(() => ['chip', 'lastFind', 'soundSwitch'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)));
   assert(sizes.every((h) => h >= 48), `every control is at least 48 px tall (${sizes})`);
   await p.keyboard.press('Escape'); await sleep(300);
-  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#chip .chev')).transform), 'none', 'closed again: the chevron points down');
-  await p.close(); t('pressable look, press tint, chevron, targets ok');
+  await p.close(); t('pressable look, press tint, targets ok');
 }
 { // reduced motion: the ring does not sweep and the card does not slide
   const places = [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }];
   const motion = async (reduce) => {
     const p = await open('?debug', async (p) => { if (reduce) await p.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]); await fakePlaces({ places })(p); }); await sleep(600);
     await p.click('#chip'); await sleep(50);
-    const r = await p.evaluate(() => ({ ring: getComputedStyle(document.querySelector('#chip .ring-arc')).transitionDuration, bar: getComputedStyle(document.querySelector('#groups .bar > span')).transitionDuration, card: getComputedStyle(document.getElementById('stats')).animationName }));
+    const r = await p.evaluate(() => ({ ring: getComputedStyle(document.querySelector('#chip .ring-arc')).transitionDuration, bar: getComputedStyle(document.getElementById('areaBar')).transitionDuration, card: getComputedStyle(document.getElementById('stats')).animationName }));
     await p.close(); return r;
   };
   assert.deepEqual(await motion(true), { ring: '0s', bar: '0s', card: 'none' }, 'reduced motion: no sweep, no growing bars, no sliding card');
@@ -994,23 +1049,558 @@ const ringAt = async (p, progress) => waitFor(async () => Math.abs((await ringOf
   assert(await waitFor(async () => (await chipState(p)).text === 'Find 3 places today', 70000), 'within a minute the chip starts the new day by itself');
   await p.close(); t('midnight rollover by timer ok');
 }
-{ // a narrow phone: the longest chip texts stay on one line and the card stays on screen
+{ // a narrow phone: the button stays small and on one line, leaving room for the AI icon on the right; the panel stays on screen
   const p = await open('?debug', fakePlaces({ places: [] }));
   await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
-  for (const label of ['Find 3 places today', '2 of 3 places today', 'Today’s goal done']) {
-    await p.evaluate((l) => { document.getElementById('chipText').textContent = l; }, label);
-    const r = await p.evaluate(() => document.getElementById('chip').getBoundingClientRect().toJSON());
-    assert(r.height <= 56 && r.right <= 320 - 12, `"${label}" fits on one line (${Math.round(r.width)} x ${Math.round(r.height)} px)`);
-  }
-  await p.evaluate(() => { document.getElementById('chipText').textContent = 'Find 3 places today, and then a good few more besides'; });
-  const long = await p.evaluate(() => ({ right: document.getElementById('chip').getBoundingClientRect().right, cut: document.getElementById('chipText').scrollWidth > document.getElementById('chipText').clientWidth }));
-  assert(long.right <= 320 - 12 && long.cut, `a very long label shortens instead of pushing the chip off screen (right edge ${Math.round(long.right)})`);
-  await p.evaluate(() => { document.getElementById('chipText').textContent = 'Find 3 places today'; });
+  const r = await p.evaluate(() => document.getElementById('chip').getBoundingClientRect().toJSON());
+  assert(r.height >= 44 && r.height <= 56 && r.width <= 160, `the button is a small one-line target (${Math.round(r.width)} x ${Math.round(r.height)} px)`);
+  assert(r.right <= 320 - 56 - 16 - 8, `and leaves 56 px at the top right for another icon (right edge ${Math.round(r.right)})`);
   await p.click('#chip'); await sleep(400);
   const card = await p.evaluate(() => document.getElementById('stats').getBoundingClientRect().toJSON());
   assert(card.left >= 0 && card.right <= 320 && card.bottom <= 640, `the open card fits a small screen (${Math.round(card.right)} x ${Math.round(card.bottom)})`);
   await shot(p, 'card-narrow');
   await p.close(); t('narrow phone ok');
+}
+
+console.log('Phase 7: regions');
+{ // the places service is faked: every /places request is recorded, and answered from `answer(url)` (a region, or a status number for a failure, or 'abort')
+  const TOKYO = { lat: 35.675, lng: 139.65 };                    // the region centre that a fix at 35.6762, 139.6503 rounds to
+  const region = (c, names, extra = 0) => ({ source: 'OpenStreetMap contributors (ODbL)', fetched: '2026-10-09', center: c, radius: 2000,
+    places: names.map((name, i) => ({ id: `node/${i + 1 + extra}`, name, type: 'cafe', lat: c.lat + dN(20 + i * 300), lng: c.lng })) });
+  const service = (answer, calls) => async (p) => {
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().includes('/places?')) return r.continue();
+      calls.push(r.url());
+      const a = answer(new URL(r.url()));
+      if (a === 'abort') return r.abort().catch(() => {});
+      if (typeof a === 'number') return r.respond({ status: a, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"error":"x"}' }).catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(a) }).catch(() => {});
+    });
+  };
+  const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 25 });
+  const total = (p) => stats(p).then((s) => s.places);
+  const REGIONS = 'fogwalk:regions:v1';
+  const q = (u) => ({ lat: Number(u.searchParams.get('lat')), lng: Number(u.searchParams.get('lng')) });
+
+  // first open in Tokyo: one request, with a rounded centre; places from the service; the map goes there; no "New area" for the first region
+  const device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+  const aCalls = [];
+  let p = await open('', async (p) => { await service(() => region(TOKYO, ['Shibuya Cafe', 'Far Cafe']), aCalls)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'the places of the new region: ' + await total(p));
+  assert.equal(aCalls.length, 1, 'one request');
+  assert.deepEqual(q(new URL(aCalls[0])), TOKYO, 'and it carries the rounded centre');
+  assert(!aCalls.join().includes('35.6762') && !aCalls.join().includes('139.6503'), 'never the precise position');
+  assert(Math.abs((await centre(p)).lat - 35.676) < 0.01, 'the map is in Tokyo');
+  assert(!(await toasts(p)).includes('New area'), 'no message for the first region');
+  assert.equal(JSON.parse(await ls(p, REGIONS)).regions.length, 1, 'and the region is kept on the phone');
+  assert((await count(p)) > 0, 'the fog clears there');
+  const cleared = await count(p);
+  await p.close(); t('first open: one rounded request, places, map, kept ok');
+
+  // reload with the service blocked: the kept region is enough (no network), and the map opens there
+  const bCalls = [];
+  p = await open('', async (p) => { await service(() => 'abort', bCalls)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'the same places with no network: ' + await total(p));
+  assert.equal(bCalls.length, 0, 'no request');
+  assert.equal((await count(p)), cleared, 'and the fog came back');
+
+  // walk 1.6 km out: a new region around you, the old fog stays, a message says so
+  const NEW = { lat: 35.69, lng: 139.65 };                        // 1.6 km north of the first centre, already on the grid
+  const moved = [];
+  await p.close();
+  p = await open('', async (p) => { await service(() => region(NEW, ['Uptown Bar'], 10), moved)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'));
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'the places of the new region: ' + await total(p));
+  assert.equal(moved.length, 1, 'one request');
+  assert.deepEqual(q(new URL(moved[0])), NEW, 'for the rounded spot you are at');
+  assert((await toasts(p)).includes('New area'), 'with a message: ' + (await toasts(p)).join('|'));
+  assert((await count(p)) >= cleared, 'the earlier fog is still there');
+  assert.deepEqual(JSON.parse(await ls(p, REGIONS)).regions.map((r) => r.center), [NEW, TOKYO], 'both regions are kept, newest first');
+
+  // and back: the first region again, from the phone, no request
+  moved.length = 0;
+  await fixAt(p, 35.6762, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found'), 'back in the first region: ' + await total(p));
+  assert.equal(moved.length, 0, 'no request: it was kept');
+  await p.close(); t('reload offline, walk out, new region, walk back ok');
+
+  // a failure while walking out does not stop you coming back into a region that is stored
+  const flaky = [];
+  p = await open('', async (p) => { await service(() => 502, flaky)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: device });
+  assert(await waitFor(async () => /places found$/.test(await total(p))), 'the stored region opens: ' + await total(p));
+  await fixAt(p, 35.7100, 139.6500);                              // 3.9 km out: no stored region covers it, so the service is asked (and fails)
+  assert(await waitFor(async () => flaky.length === 1), 'asked once');
+  await fixAt(p, 35.6762, 139.6503);
+  assert(await waitFor(async () => /^0 of \d places found$/.test(await total(p)), 3000), 'back in a stored region at once, not after the retry wait: ' + await total(p));
+  assert.equal(flaky.length, 1, 'with no new request');
+  await p.close(); t('a failed load never blocks a stored region ok');
+
+  // the service fails: the fog still clears, the card says why, nothing is kept, and it is not asked again at once
+  const fail = [];
+  const lost = await browser.createBrowserContext(); await lost.overridePermissions(ORIGIN, ['geolocation']);
+  p = await open('', async (p) => { await service(() => 502, fail)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: lost });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'), 'says why: ' + await total(p));
+  assert((await count(p)) > 0, 'the fog clears all the same');
+  assert.equal(await ls(p, REGIONS), null, 'a failure is not kept');
+  assert.equal(fail.length, 1, 'asked once: the service already tried three Overpass servers, so a 5xx is not asked again at once');
+  await fixAt(p, 35.6764, 139.6503); await sleep(1500);
+  assert.equal(fail.length, 1, 'and not asked again on the next step either');
+  await p.close(); t('failed load: says so, keeps nothing, waits before asking again ok');
+
+  // near SUTD the shipped file is used and the service is never asked
+  const home = [];
+  p = await open('', async (p) => { await service(() => 500, home)(p); await fixAt(p, 1.35, 103.97); });
+  assert(await waitFor(async () => /^0 of \d{3} places found$/.test(await total(p))), 'the SUTD places: ' + await total(p));
+  assert.equal(home.length, 0, 'no request near SUTD');
+  assert.equal(await ls(p, REGIONS), null, 'and the shipped file is not stored');
+  await p.close(); t('near SUTD: no request ok');
+}
+
+console.log('Phase 7.1: the same behaviour wherever you are');
+{ // helpers: a faked places service, and fixes at a given spot
+  const C = { lat: 35.675, lng: 139.65 };
+  const region = (c, names) => ({ source: 'OpenStreetMap contributors (ODbL)', fetched: '2026-10-09', center: c, radius: 2000,
+    places: names.map((name, i) => ({ id: `node/${i + 1}`, name, type: 'cafe', lat: c.lat + dN(20 + i * 300), lng: c.lng })) });
+  const service = (answer, calls) => async (p) => {                  // answer(callNumber, centreAskedFor) = a region, a status number, or 'hang' (never answered)
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().includes('/places?')) return r.continue();
+      calls.push(r.url());
+      const u = new URL(r.url());
+      const a = answer(calls.length, { lat: Number(u.searchParams.get('lat')), lng: Number(u.searchParams.get('lng')) });
+      if (a === 'hang') return;
+      const headers = { 'access-control-allow-origin': '*' };
+      if (typeof a === 'number') return r.respond({ status: a, contentType: 'application/json', headers, body: '{"error":"x"}' }).catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', headers, body: JSON.stringify(a) }).catch(() => {});
+    });
+  };
+  const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 10 });
+  const total = (p) => stats(p).then((s) => s.places);
+  const tune = (t) => (p) => p.evaluateOnNewDocument((t) => { window.__tuning = t; }, t);
+  const phone = async () => { const c = await browser.createBrowserContext(); await c.overridePermissions(ORIGIN, ['geolocation']); return c; };
+
+  // the reported bug: places load for the first time over fog cleared in an earlier visit (the service was down then)
+  const device = await phone();
+  const down = [];
+  let p = await open('', async (p) => { await service(() => 502, down)(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'), 'visit 1: no places: ' + await total(p));
+  assert((await count(p)) > 20, 'but the fog clears');
+  await p.evaluate(() => dispatchEvent(new Event('pagehide')));        // the fog is saved
+  await p.close();
+  const up = [];
+  p = await open('', async (p) => { await service(() => region(C, ['Under Old Fog', 'Far Cafe']), up)(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'visit 2: the place under the old fog is found: ' + await total(p));
+  assert.deepEqual(await pins(p), ['Under Old Fog']);
+  assert((await toasts(p)).includes('Found Under Old Fog'), 'it is announced: ' + (await toasts(p)).join('|'));
+  let st = await stats(p);
+  assert.equal(st.chip, '1 of 3 places today', "and it counts toward today's goal"); assert.equal(st.last, 'Last: Under Old Fog');
+  assert.deepEqual(JSON.parse(await ls(p, 'fogwalk:found:v1')).ids, ['node/1'], 'and the device remembers it');
+  await sleep(300); await p.close();
+  // visit 3: a reload does not announce or count it again
+  p = await open('', async (p) => { await service((n, c) => region(c, c.lat === C.lat ? ['Under Old Fog', 'Far Cafe'] : ['Elsewhere']), [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: device });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'));
+  await sleep(500);
+  assert.deepEqual(await toasts(p), [], 'visit 3: not announced again');
+  assert.equal((await stats(p)).chip, '1 of 3 places today', 'nor counted twice');
+  assert.deepEqual(await pins(p), ['Under Old Fog'], 'its pin is there');
+  // walk out to another region and back to this one: still not announced again
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'the next region: ' + await total(p));
+  await fixAt(p, C.lat + 0.00001, C.lng);
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'back in the first region');
+  assert.deepEqual((await toasts(p)).filter((x) => x.startsWith('Found')), [], 'returning to a region does not announce its finds again');
+  await p.close(); await device.close(); t('places loaded over old fog are found, once ok');
+
+  // places that load over fog from an earlier visit also count toward today's goal, in the chip and in the panel
+  const tdev = await phone();
+  p = await open('', async (p) => { await service(() => 502, [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: tdev });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet'));
+  await p.evaluate(() => dispatchEvent(new Event('pagehide'))); await p.close();
+  p = await open('', async (p) => { await service(() => region(C, ['Under Old Fog', 'Far Cafe', 'Third Cafe']), [])(p); await fixAt(p, C.lat + 0.00001, C.lng); }, { ctx: tdev });
+  assert(await waitFor(async () => (await total(p)) === '1 of 3 places found'));
+  assert.equal((await stats(p)).chip, '1 of 3 places today', "today's goal counts the find");
+  await p.close(); await tdev.close(); t('today counts finds under old fog ok');
+
+  // a request that never answers is a failure after the time limit, and is asked again after the wait
+  const hung = [];
+  const hdev = await phone();
+  p = await open('', async (p) => { await tune({ timeoutMs: 700, retryMs: 1200 })(p); await service((n) => (n === 1 ? 'hang' : region(C, ['Shibuya Cafe', 'Far Cafe'])), hung)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: hdev });
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet', 6000), 'a hung request becomes a failure: ' + await total(p));
+  assert.equal(hung.length, 1);
+  await sleep(1300); await fixAt(p, 35.6763, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 2 places found', 6000), 'and the next step asks again: ' + await total(p));
+  assert.equal(hung.length, 2);
+  await p.close(); await hdev.close(); t('hung request: failure, then asked again ok');
+
+  // an empty answer may be a throttled server: asked again, twice, then believed
+  const empties = [];
+  const edev = await phone();
+  p = await open('', async (p) => { await tune({ retryMs: 800 })(p); await service((n) => (n === 1 ? region(C, []) : region(C, ['Shibuya Cafe'])), empties)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: edev });
+  assert(await waitFor(async () => empties.length === 1));
+  await sleep(300);
+  assert.equal(await total(p), '0 places found', 'an empty region');
+  assert.equal(await ls(p, 'fogwalk:regions:v1'), null, 'is not kept on the phone');
+  await sleep(900); await fixAt(p, 35.6763, 139.6503);
+  assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'asked again, and the places arrive: ' + await total(p));
+  assert.equal(empties.length, 2);
+  await p.close();
+  const always = [];
+  const edev2 = await phone();                                           // a device with nothing stored
+  p = await open('', async (p) => { await tune({ retryMs: 500 })(p); await service(() => region(C, []), always)(p); await fixAt(p, 35.6762, 139.6503); }, { ctx: edev2 });
+  for (let i = 1; i <= 8; i++) { await sleep(700); await fixAt(p, 35.6762 + i * 0.00001, 139.6503); }
+  assert.equal(always.length, 3, 'a really empty area is asked three times, not for ever (' + always.length + ')');
+  await p.close(); await edev.close(); await edev2.close(); t('empty answer: asked again twice, then accepted ok');
+
+  // you walk out of a region, the next one fails, and you carry on: the region you left must not stay
+  const far = [];
+  const fdev = await phone();
+  p = await open('', async (p) => { await service((n) => (n === 1 ? region(C, ['Shibuya Cafe', 'Far Cafe']) : 502), far)(p); await fixAt(p, C.lat + 0.00005, C.lng); }, { ctx: fdev });
+  assert(await waitFor(async () => (await pins(p)).length === 1), 'a found pin in the first region');
+  await fixAt(p, 35.6876, 139.6576);                                   // 1.6 km out: a new region is asked for, and fails
+  assert(await waitFor(async () => far.length === 2), 'asked for the next region');
+  await sleep(500);
+  await fixAt(p, 35.6924, 139.6624);                                   // 2.2 km out, same new region: the failure wait is still running
+  assert(await waitFor(async () => (await total(p)) === 'No places loaded for this area yet' && (await pins(p)).length === 0, 4000), 'the region left behind is gone: ' + await total(p) + ' ' + JSON.stringify(await pins(p)));
+  assert.equal(far.length, 2, 'and the failed region is not asked for again at once');
+  await p.close(); await fdev.close(); t('a failed next region does not keep the old one on screen ok');
+
+  // a device that already had fog from before the found list existed: what was under that fog was shown as found, so it stays quiet, once
+  const ldev = await phone();
+  const spot = { lat: C.lat + dN(20), lng: C.lng };                     // 'Under Old Fog' is here
+  const lcalls = [];
+  p = await open('', async (p) => {
+    await p.evaluateOnNewDocument((keys, fogKey) => localStorage.setItem(fogKey, JSON.stringify({ keys })), [cellKey(...cellOf(spot.lat, spot.lng))], REAL);
+    await service(() => region(C, ['Under Old Fog', 'Far Cafe']), lcalls)(p); await fixAt(p, C.lat + 0.00001, C.lng);
+  }, { ctx: ldev });
+  assert(await waitFor(async () => (await total(p)) === '1 of 2 places found'), 'legacy device: ' + await total(p));
+  await sleep(500);
+  assert.deepEqual(await toasts(p), [], 'no burst of old finds');
+  assert.equal((await stats(p)).chip, 'Find 3 places today', "and today's goal does not jump");
+  assert.deepEqual(JSON.parse(await ls(p, 'fogwalk:found:v1')).ids, ['node/1'], 'but it is remembered as found');
+  await p.close(); await ldev.close(); t('a device with older fog stays quiet once ok');
+
+  // the debug reset forgets finds too, so re-walking the same route announces them again
+  const dbg = await open('?debug', fakePlaces({ places: [{ name: 'Right Here', type: 'cafe', lat: S0.lat + dN(10), lng: S0.lng }] })); await sleep(800);
+  assert.deepEqual(await toasts(dbg), ['Found Right Here']);
+  await dbg.click('#debugReset'); await sleep(2500);
+  assert.deepEqual(await toasts(dbg), ['Found Right Here'], 'after reset it is a find again');
+  await dbg.close(); t('debug reset forgets finds ok');
+}
+
+console.log('Phase 9: quests');
+const questState = (p) => p.evaluate(() => fogMap.quest());
+const pinCount = (p) => p.evaluate(() => document.querySelectorAll('.quest-pin').length);
+const QUEST = { quests: true };
+// the quest lives top right: a flag button (its label says how far along you are) and the card under it (the line, and the detail)
+const flag = (p) => p.evaluate(() => { const b = document.getElementById('questBtn'); return b.hidden ? null : b.getAttribute('aria-label').replace(/^Quest: |\. Details$/g, ''); });
+const card = (p) => p.evaluate(() => document.getElementById('questCard').hidden ? null
+  : { line: document.getElementById('questLine').textContent, detail: document.getElementById('questDetail').textContent, gemma: !document.getElementById('questBy').hidden });
+const flagRingAt = (p, progress) => waitFor(async () => Math.abs((await p.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#questBtn .ring-arc')).strokeDashoffset))) - RING * (1 - progress)) < 0.01, 3000);
+let q;
+{ // fake places, real-mode fixes: a reach quest, then a find quest, then nothing left (the flag goes away)
+  const places = [0, 250, 700, 1000].map((n, i) => ({ name: `Spot ${i}`, type: 'cafe', lat: S0.lat + dN(n), lng: S0.lng }));
+  places.shift(); places.unshift({ name: 'Home', type: 'cafe', lat: S0.lat + dN(90), lng: S0.lng });   // 90 m: close, but outside the reveal circle and the 150 m band
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  const fixAt = (n) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  const detail = () => p.evaluate(() => document.getElementById('toastDetail').textContent);
+  const chip = () => p.evaluate(() => document.getElementById('chip').getAttribute('aria-label')).then(goalLabel);
+  assert.equal(await questState(p), null, 'no position yet: no quest');
+  assert.equal(await flag(p), null, 'and no quest flag');
+  assert.equal(await chip(), 'Find 3 places today', 'the chip shows today\'s goal');
+  await fixAt(0); await sleep(500);
+  q = await questState(p);
+  assert.deepEqual([q.kind, q.seq, q.done, q.key.startsWith('Spot 1|')], ['reach', 0, false, true], 'the first fix starts a reach quest, aimed at the one place in the 150-400 m band');
+  assert.equal(await flag(p), 'Find the hidden spot, 250 m', 'the flag says what to do');
+  assert.equal(await p.evaluate(() => document.getElementById('questDist').textContent), '250 m', 'and the pill itself shows the distance, so the card need not be opened');
+  assert.deepEqual(await card(p), { line: 'Head north to a cafe spot hidden in the fog.', detail: 'Follow the hint, about 250 m away', gemma: false }, 'a new quest opens its card: the plain hint (Gemma is off)');
+  assert.equal(await chip(), 'Find 3 places today', 'the chip keeps today\'s goal');
+  const top = await p.evaluate(() => ({ flag: document.getElementById('questBtn').getBoundingClientRect().toJSON(), chip: document.getElementById('chip').getBoundingClientRect().toJSON(), card: document.getElementById('questCard').getBoundingClientRect().toJSON() }));
+  assert(top.flag.right >= 390 - 16 - 1 && top.flag.top <= 20, `the flag sits in the top-right corner (${JSON.stringify(top.flag)})`);
+  assert(top.chip.right <= top.flag.left, 'beside the chip, not over it');
+  assert(top.card.right >= 390 - 16 - 1 && top.card.top >= top.flag.bottom, 'its card hangs under it, on the right');
+  assert.equal(await pinCount(p), 0, 'the spot is not marked on the map: the hint has to do the work');
+  await shot(p, 'quest-reach');
+  assert.deepEqual(await pins(p), [], 'and the place itself is hidden under the fog');
+  await p.mouse.click(195, 600); await sleep(300);
+  assert.equal(await card(p), null, 'a tap on the map closes the card');
+  // the wrong way: well past 1.5 times the start distance
+  await fixAt(-150); await sleep(400);
+  assert.deepEqual([(await toasts(p)).at(-1), await detail()], ['You’re heading away from the quest', 'It’s about 400 m north'], 'heading away gets a warning, with the way back');
+  await fixAt(-160); await sleep(400);
+  assert.equal((await toasts(p)).filter((x) => x === 'You’re heading away from the quest').length, 1, 'once, not on every step');
+  await fixAt(100); await sleep(400);   // 'Home' (90 m) clears on the way
+  assert.equal(await flag(p), 'Find the hidden spot, 150 m', 'the distance follows you, rounded to 10 m');
+  assert.equal(await detail(), 'Cafe', 'finding another place does not finish the quest');
+  assert(await flagRingAt(p, 0.4), 'the flag\'s ring is 100/250 full (distance walked so far)');
+  assert.equal(await chip(), '1 of 3 places today', 'while the chip counts today\'s finds');
+  assert.equal(await pinCount(p), 0, 'still not marked');
+  // got 100 m closer, then drifted 70 m back out: lost, so the spot is marked
+  await fixAt(30); await sleep(400);
+  assert.deepEqual([(await toasts(p)).at(-1), await detail()], ['The quest spot is on the map', 'Follow the flag'], 'drifting back out after getting close marks the spot, and says so');
+  assert.equal(await pinCount(p), 1, 'its spot is marked on the map now');
+  assert.equal(await flag(p), 'Reach the marked spot, 220 m');
+  const spot = await p.evaluate(() => { const e = document.querySelector('.quest-pin'), d = e.querySelector('.quest-disc'), cs = getComputedStyle(d), pane = e.closest('.leaflet-pane');
+    return { pane: pane.className, z: Number(getComputedStyle(pane).zIndex), fog: Number(getComputedStyle(document.querySelector('.leaflet-fog-pane')).zIndex), bg: cs.backgroundColor, title: e.title, flag: !!d.querySelector('svg path') }; });
+  assert.match(spot.pane, /leaflet-quest-pane/, 'in its own pane');
+  assert(spot.z > spot.fog, 'above the fog, so the fog does not hide it');
+  assert.equal(spot.bg, 'rgb(238, 243, 248)', 'daylight, not gold: gold is for discoveries'); assert.equal(spot.title, 'Quest spot'); assert(spot.flag, 'a flag, so it reads without colour');
+  await p.evaluate(() => document.querySelector('.quest-pin').click()); await sleep(300);
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), 'Reach the marked spot, 220 m', 'tapping it says how far away it is');
+  await fixAt(110); await sleep(400);   // closer than ever: the quest is saved again
+  assert.equal(await p.evaluate(() => document.querySelector('.leaflet-popup-content')?.textContent), 'Reach the marked spot, 220 m', 'a step closer keeps the marker and its open popup');
+  await p.click('#questBtn'); await sleep(300);
+  await shot(p, 'quest-card');
+  assert.equal((await card(p)).detail, 'Walk to the marked spot on the map, about 140 m away', 'the flag opens the card again');
+  await p.click('#chip'); await sleep(300);
+  assert.deepEqual([await card(p), await p.evaluate(() => document.getElementById('stats').hidden)], [null, false], 'one card at a time: the stats card replaces it');
+  assert.equal(await p.evaluate(() => document.getElementById('statsTitle').textContent), 'Today', 'and is about today');
+  await p.click('#chip'); await sleep(200);
+  await fixAt(250); await sleep(500);
+  assert.equal(await flag(p), 'Quest done'); assert.equal(await detail(), 'Quest done', 'the find message says so');
+  assert.equal(await p.evaluate(() => document.getElementById('questDist').textContent), 'Done', 'the pill says Done');
+  assert.deepEqual(await card(p), { line: 'Found it: Spot 1', detail: 'Head north to a cafe spot hidden in the fog.', gemma: false }, 'and the card opens by itself with the payoff: what the hint was pointing at');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.getElementById('questGemma')).display), 'none', 'without the Gemma offer: the card is celebrating');
+  await shot(p, 'quest-done');
+  assert(await flagRingAt(p, 1), 'the ring is full'); assert.equal(await pinCount(p), 0, 'the spot marker is gone: the place\'s own gold pin took over');
+  assert((await pins(p)).includes('Spot 1'), 'the place is on the map now');
+  q = await questState(p); assert.deepEqual([q.kind, q.done], ['reach', true]);
+  assert(await waitFor(async () => (await flag(p)) === 'Find 2 new places', 8000), 'a few seconds later the next quest starts: find 2 new places');
+  q = await questState(p); assert.deepEqual([q.kind, q.seq, q.need, q.ids], ['find', 1, 2, []]);
+  assert.deepEqual(await card(p), { line: 'From Spot 1, wander somewhere new and uncover 2 new places.', detail: 'Uncover 2 places you haven’t found yet, 2 to go', gemma: false }, 'its card opens, starting from where you are');
+  assert.equal(await pinCount(p), 0, 'a find quest has no marker');
+  await fixAt(700); await sleep(400);
+  assert.equal(await flag(p), '1 of 2 new places'); assert(await flagRingAt(p, 0.5), 'half way round');
+  await shot(p, 'quest-find');
+  // a reload mid-quest keeps it, with its progress (the same device: shared storage)
+  const ctx = p.browserContext(); await p.close();
+  const again = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, { ...QUEST, ctx }); await sleep(800);
+  q = await questState(again); assert.deepEqual([q.kind, q.seq, q.ids.length, q.done], ['find', 1, 1, false], 'the quest and its progress come back');
+  assert.equal(await flag(again), '1 of 2 new places', 'and so does the flag');
+  assert.equal(await again.evaluate(() => document.getElementById('chip').getAttribute('aria-label')).then(goalLabel), 'Today’s goal done', 'today\'s count came back too');
+  const fixAgain = (n) => again.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(n), longitude: S0.lng, accuracy: 20 });
+  await fixAgain(1000); await sleep(500);
+  assert.equal(await again.evaluate(() => document.getElementById('toastDetail').textContent), 'Quest done');
+  assert(await waitFor(async () => (await again.evaluate(() => fogMap.quest())) === null, 8000), 'nothing left to find: no new quest');
+  assert.deepEqual([await flag(again), await card(again)], [null, null], 'and the flag and its card go away');
+  await again.close(); t('reach, find, reload, nothing left ok');
+}
+{ // the saved quest comes back open after a reload; and if its place was cleared while the page was closed, that still finishes it
+  const lat = S0.lat + dN(250), lng = S0.lng;
+  const places = [{ name: 'Spot A', type: 'cafe', lat, lng }, { name: 'Spot B', type: 'cafe', lat: S0.lat + dN(700), lng }];
+  const reach = { kind: 'reach', seq: 0, done: false, key: `Spot A|${lat}|${lng}`, lat, lng, start: 250, text: 'Gemma said: go north into the fog.' };   // saved before hints: no t / best / revealed
+  const seeded = (fogKeys, r = reach) => async (p) => {
+    await captureFix(p); await fakePlaces({ places })(p);
+    await p.evaluateOnNewDocument((r, keys, fogKey) => { localStorage.setItem('fogwalk:quest', JSON.stringify(r)); if (keys) localStorage.setItem(fogKey, JSON.stringify({ keys })); }, r, fogKeys, REAL);
+  };
+  const open1 = await open('', seeded(null), QUEST); await sleep(800);
+  q = await questState(open1);
+  assert.deepEqual([q.kind, q.done, q.key], ['reach', false, reach.key], 'a saved open reach quest is back after a reload');
+  assert.equal(await pinCount(open1), 1, 'with its marker (saved before hints, so already marked)'); assert.equal(await flag(open1), 'Reach the marked spot, 250 m');
+  assert.deepEqual(await card(open1), { line: reach.text, detail: 'Walk to the marked spot on the map, about 250 m away', gemma: true }, 'and the line Gemma wrote for it, credited');
+  await open1.close();
+  const fresh = await open('', seeded(null, { ...reach, t: Date.now(), best: 250, revealed: false }), QUEST); await sleep(800);
+  assert.deepEqual([await pinCount(fresh), await flag(fresh)], [0, 'Find the hidden spot, 250 m'], 'a quest still being looked for comes back hidden');
+  await fresh.close();
+  const stale = await open('', seeded(null, { ...reach, t: Date.now() - 6 * 60_000, best: 250, revealed: false }), QUEST); await sleep(800);
+  assert.deepEqual([await pinCount(stale), await flag(stale)], [1, 'Reach the marked spot, 250 m'], 'one looked for over 5 minutes comes back marked');
+  assert.deepEqual(await toasts(stale), ['The quest spot is on the map'], 'and says so');
+  assert.equal((await stale.evaluate(() => JSON.parse(localStorage.getItem('fogwalk:quest')))).revealed, true, 'which is saved');
+  await stale.close();
+  const open2 = await open('', seeded([cellKey(...cellOf(lat, lng))]), QUEST); await sleep(800);   // the fog saved on this device already covers Spot A
+  assert.equal((await questState(open2)).done, true, 'its place is already cleared: the quest is done, quietly');
+  assert.equal(await flag(open2), 'Quest done');
+  assert.deepEqual(await toasts(open2), [], 'no find message for a place that was found before this visit');
+  await open2.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 });   // the next quest needs to know where you are
+  assert(await waitFor(async () => (await questState(open2))?.kind === 'find', 8000), 'and the next quest follows');
+  await open2.close(); t('saved quest restored, quiet completion ok');
+}
+{ // every place is right here: no reach quest is possible, so a find quest starts instead of none
+  const places = [{ name: 'Next Door', type: 'cafe', lat: S0.lat + dN(55), lng: S0.lng }];
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 }); await sleep(500);
+  q = await questState(p);
+  assert.deepEqual([q.kind, q.seq, q.need], ['find', 1, 1], 'a find quest for the one place, not nothing');
+  assert.equal(await flag(p), 'Find 1 new place');
+  await p.close(); t('no reach target: find quest instead ok');
+}
+{ // damaged or foreign saved quest data is ignored, and a quest whose place is gone from the file is replaced
+  const places = [{ name: 'Spot A', type: 'cafe', lat: S0.lat + dN(250), lng: S0.lng }];
+  const cases = [['{{{', 'reach', 0], ['{"kind":"reach"}', 'reach', 0], ['"x"', 'reach', 0],
+    [JSON.stringify({ kind: 'reach', seq: 4, done: false, key: 'gone|1|2', lat: 1, lng: 2, start: 300 }), 'find', 5]];   // valid, but its place is not in the file: replaced by the next quest in line
+  for (const [bad, kind, seq] of cases) {
+    const p = await open('?debug', async (p) => { await fakePlaces({ places })(p); await p.evaluateOnNewDocument((v) => localStorage.setItem('fogwalk:quest:debug', v), bad); }, QUEST); await sleep(1000);
+    const q = await questState(p);
+    assert(q && q.kind === kind && q.seq === seq && !q.done, `saved value ${bad.slice(0, 30)} gives a fresh ${kind} quest ` + JSON.stringify(q));
+    await p.close();
+  }
+  t('damaged saved quest ignored ok');
+}
+{ // the real data in a debug walk: walk to the marked spot and finish the quest, then reset starts over from the first quest
+  const p = await open('?debug=30', undefined, QUEST); await sleep(1500);
+  q = await questState(p);
+  assert.deepEqual([q.kind, q.seq, q.done], ['reach', 0, false], 'a reach quest from the real places');
+  assert(q.start >= 60 && q.start <= 2000, 'with a sensible distance: ' + Math.round(q.start));
+  assert.match(await flag(p), /^Find the hidden spot, /, 'its spot starts hidden');
+  assert.match((await card(p)).line, /^Head (north|south|east|west|north-east|north-west|south-east|south-west) to an? [a-z ]+ spot hidden in the fog\.$/, 'the plain line names the kind of place and the way, not the place');
+  await p.evaluate((lat, lng) => fogMap.map.fire('click', { latlng: { lat, lng } }), q.lat, q.lng);
+  assert(await waitFor(async () => (await questState(p))?.done === true, 60000), 'walking to the spot finishes the quest');
+  assert.equal(await flag(p), 'Quest done');
+  assert((await toasts(p)).length > 0, 'with a find message');
+  assert(await waitFor(async () => (await questState(p))?.kind === 'find', 8000), 'and a find quest follows');
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('fogwalk:quest:debug')));
+  assert.equal(saved.seq, 1, 'it is saved (under the debug key, apart from a real walk)');
+  assert.equal(await p.evaluate(() => localStorage.getItem('fogwalk:quest')), null, 'a simulated walk never touches the real quest');
+  await p.click('#debugReset'); await sleep(2000);
+  q = await questState(p); assert.deepEqual([q.kind, q.seq], ['reach', 0], 'reset starts the quests over');
+  await p.close(); t('real data: walk, finish, next, reset ok');
+}
+{ // ?quests=off is the plain map: no quest, no flag, no Gemma switch, today's goal on the chip
+  const p = await open('?debug', undefined); await sleep(1500);
+  assert.equal(await questState(p), null); assert.equal(await pinCount(p), 0); assert.equal(await flag(p), null);
+  assert.equal(await p.evaluate(() => document.getElementById('gemmaSwitch').hidden), true);
+  assert.equal(await p.evaluate(() => document.getElementById('chip').getAttribute('aria-label')).then(goalLabel), 'Find 3 places today');
+  assert.equal(await p.evaluate(() => localStorage.getItem('fogwalk:quest:debug')), null, 'and nothing is saved for quests');
+  await p.close(); t('quests off ok');
+}
+{ // a crowd of pins: of places found close together, only the newest pin shows; zooming in spreads them out and brings the rest back
+  const places = [0, 1, 2].map((i) => ({ name: `Stall ${i}`, type: 'cafe', lat: S0.lat + dN(10 * i), lng: S0.lng }));   // 10 m apart: one spot at street zoom
+  const p = await open('?debug', fakePlaces({ places })); await sleep(1500);
+  const shown = () => p.evaluate(() => [...document.querySelectorAll('.place-pin')].filter((e) => e.style.display !== 'none').map((e) => e.title));
+  assert.equal((await pins(p)).length, 3, 'all three are found');
+  assert.deepEqual(await shown(), ['Stall 2'], 'one pin shows for the crowd: the newest find');
+  await shot(p, 'pins-crowded');
+  await p.evaluate(() => fogMap.map.setZoom(19)); await sleep(1200);
+  assert.deepEqual((await shown()).sort(), ['Stall 0', 'Stall 1', 'Stall 2'], 'zoomed in, they all show');
+  await p.evaluate(() => fogMap.map.setZoom(17)); await sleep(1200);
+  assert.equal((await shown()).length, 1, 'zoomed back out, one again');
+  await p.close(); t('crowded pins ok');
+}
+{ // the Gemma switch, without the real model: off by default with its size; where there's no WebGPU it says so and can't be turned on
+  const p = await open('?debug', undefined, QUEST); await sleep(1500);
+  await p.click('#chip'); await sleep(300);
+  const sw = () => p.evaluate(() => { const s = document.getElementById('gemmaSwitch'); return { shown: !s.hidden, on: s.getAttribute('aria-checked'), off: s.disabled, note: document.getElementById('gemmaNote').textContent }; });
+  const gpu = await p.evaluate(() => !!navigator.gpu);
+  assert.deepEqual(await sw(), gpu ? { shown: true, on: 'false', off: false, note: '800 MB download, runs on this phone' }
+    : { shown: true, on: 'false', off: true, note: 'Needs WebGPU, which this browser lacks' }, 'the switch says what turning it on costs');
+  await shot(p, 'gemma-switch');
+  await p.close();
+  const none = await open('?debug', (p) => p.evaluateOnNewDocument(() => { Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }); }), QUEST); await sleep(1500);
+  assert.deepEqual(await none.evaluate(() => [document.getElementById('gemmaSwitch').disabled, document.getElementById('gemmaNote').textContent]), [true, 'Needs WebGPU, which this browser lacks'], 'no WebGPU: it says so, and stays off');
+  await none.close(); t('Gemma switch ok');
+}
+if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fresh profile): switch it on and the quest line becomes Gemma's, checked and credited
+  const p = await open('?debug', undefined, QUEST); await sleep(1500);
+  const rejected = []; p.on('console', (m) => { if (m.text().startsWith('Gemma line rejected')) rejected.push(m.text()); });
+  await p.click('#chip'); await sleep(300);
+  await p.click('#gemmaSwitch');
+  assert(await waitFor(async () => (await p.evaluate(() => document.getElementById('gemmaNote').textContent)) === 'Runs on this phone, offline', 600000), 'Gemma loads');
+  assert(await waitFor(async () => !!(await questState(p))?.text, 60000), 'and writes the open quest a line (rejected: ' + rejected.join(' | ') + ')');
+  if (rejected.length) console.log('    rejected first: ' + rejected.join(' | '));
+  q = await questState(p);
+  await p.click('#chip'); await p.click('#questBtn'); await sleep(300);
+  const c = await card(p);
+  assert.deepEqual([c.line, c.gemma], [q.text, true], 'the card shows it, credited to Gemma');
+  console.log('    Gemma wrote: ' + q.text);
+  await shot(p, 'quest-gemma');
+  const ctx = p.browserContext(); await p.close();
+  const again = await open('?debug', undefined, { ...QUEST, ctx }); await sleep(1500);
+  assert.equal((await questState(again)).text, q.text, 'after a reload the quest keeps its line');
+  assert(await waitFor(async () => (await again.evaluate(() => document.getElementById('gemmaNote').textContent)) === 'Runs on this phone, offline', 300000), 'and Gemma comes back on by itself');
+  await again.close(); t('real Gemma ok');
+}
+
+
+{ // quests and regions: the quest follows you across a region change, as long as its place is still on the list
+  const TOKYO = { lat: 35.675, lng: 139.65 }, NEW = { lat: 35.69, lng: 139.65 };
+  const place = (id, name, c, n) => ({ id, name, type: 'cafe', lat: c.lat + dN(n), lng: c.lng });
+  const region = (c, places) => ({ source: 'OpenStreetMap contributors (ODbL)', fetched: '2026-10-09', center: c, radius: 2000, places });
+  const MID = place('node/2', 'Mid Cafe', TOKYO, 320);                               // 320 m north of the first centre: the reach target
+  const first = region(TOKYO, [place('node/1', 'Near Cafe', TOKYO, 20), MID]);
+  const service = (answer, calls) => async (p) => {
+    await p.setRequestInterception(true);
+    p.on('request', (r) => {
+      if (!r.url().includes('/places?')) return r.continue();
+      calls.push(r.url());
+      const a = answer(new URL(r.url()));
+      if (a === 'abort') return r.abort().catch(() => {});
+      r.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(a) }).catch(() => {});
+    });
+  };
+  const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 25 });
+  const start = async (answer) => {
+    const calls = [], device = await browser.createBrowserContext(); await device.overridePermissions(ORIGIN, ['geolocation']);
+    const p = await open('', async (p) => { await service(answer, calls)(p); await fixAt(p, 35.6762, 139.6503); }, { ...QUEST, ctx: device });
+    assert(await waitFor(async () => (await questState(p))?.kind === 'reach', 8000), 'a reach quest starts in the first region: ' + JSON.stringify(await questState(p)));
+    assert.equal((await questState(p)).key, 'node/2', 'aimed at the place 320 m away');
+    return p;
+  };
+  // 1. the new region does not have its place: the reach quest is replaced by the next one in line
+  let p = await start((u) => (Math.abs(Number(u.searchParams.get('lat')) - NEW.lat) < 0.001 ? region(NEW, [place('node/11', 'Uptown Bar', NEW, 20), place('node/12', 'Uptown Cafe', NEW, 320)]) : first));
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await questState(p))?.seq === 1, 8000), 'walking out: the old reach quest is replaced');
+  assert.equal((await questState(p)).kind, 'find', 'by the next quest in line');
+  assert.notEqual(await flag(p), null, 'and the pill is still there');
+  await p.close();
+  // 2. the new region still lists it: the quest carries on, unchanged
+  p = await start((u) => (Math.abs(Number(u.searchParams.get('lat')) - NEW.lat) < 0.001 ? region(NEW, [place('node/11', 'Uptown Bar', NEW, 20), MID]) : first));
+  const before = await questState(p);
+  await fixAt(p, 35.6894, 139.6501);
+  assert(await waitFor(async () => (await toasts(p)).includes('New area'), 8000), 'walked into the new region');
+  const after = await questState(p);
+  assert.deepEqual([after.seq, after.key], [before.seq, before.key], 'the same quest carries on');
+  await p.close();
+  // 3. the new region fails to load: while you wait, a quest whose place is still within reach stays
+  p = await start((u) => (Math.abs(Number(u.searchParams.get('lat')) - TOKYO.lat) < 0.001 ? first : 'abort'));
+  await fixAt(p, 35.6939, 139.6503);                                                  // 2.1 km from the centre: the region is dropped, the place is 1.8 km from you
+  assert(await waitFor(async () => (await stats(p)).places === '0 places found', 8000), 'the old region is gone');
+  assert.equal((await questState(p))?.key, 'node/2', 'but the quest stays while the next region is awaited');
+  await p.close(); t('quest across region changes ok');
+}
+{ // the first-open bubble holds a new quest's card back; the pill is there, and a tap opens the card
+  const places = [{ name: 'Spot 1', type: 'cafe', lat: S0.lat + dN(250), lng: S0.lng }];
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, { ...QUEST, hint: true }); await sleep(800);
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 }); await sleep(500);
+  assert.equal(await p.evaluate(() => document.getElementById('hint').hidden), false, 'the bubble is up');
+  assert.notEqual(await flag(p), null, 'the pill shows');
+  assert.equal(await card(p), null, 'but its card is not opened over the bubble');
+  await p.click('#questBtn'); await sleep(300);
+  assert.notEqual(await card(p), null, 'a tap on the pill opens it');
+  await p.close(); t('first-open bubble holds the card back ok');
+}
+{ // the card offers Gemma while it is off (and the browser can run it); it is not offered where there is no WebGPU
+  const open1 = (setup) => open('', async (p) => { await captureFix(p); await fakePlaces({ places: [{ name: 'Spot 1', type: 'cafe', lat: S0.lat + dN(250), lng: S0.lng }] })(p); if (setup) await setup(p); }, QUEST);
+  const fix = (p) => p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 });
+  const gpu = await (async () => { const p = await open(''); const g = await p.evaluate(() => !!navigator.gpu); await p.close(); return g; })();
+  const a = await open1(); await sleep(800); await fix(a); await sleep(500);
+  const offer = () => a.evaluate(() => { const b = document.getElementById('questGemma'); return b.hidden ? null : b.textContent.trim(); });
+  assert.equal(await offer(), gpu ? 'Let Gemma write the hints 800 MB download, best on Wi-Fi' : null, 'the card offers Gemma, with its size, only where it can run');
+  await a.close();
+  const none = await open1((p) => p.evaluateOnNewDocument(() => { Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }); })); await sleep(800); await fix(none); await sleep(500);
+  assert.equal(await none.evaluate(() => document.getElementById('questGemma').hidden), true, 'no WebGPU: no offer');
+  await none.close(); t('Gemma offer in the card ok');
+}
+{ // a quest restored before the first fix does not claim a direction: once you are placed, its line says the real one (south here)
+  const lat = S0.lat - dN(250), lng = S0.lng;
+  const places = [{ name: 'Spot S', type: 'cafe', lat, lng }];
+  const reach = { kind: 'reach', seq: 0, done: false, key: `Spot S|${lat}|${lng}`, lat, lng, start: 250, t: Date.now(), best: 250, revealed: false };
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); await p.evaluateOnNewDocument((r) => localStorage.setItem('fogwalk:quest', JSON.stringify(r)), reach); }, QUEST); await sleep(800);
+  assert.doesNotMatch((await card(p))?.line ?? '', /north/, 'before the first fix it does not say north');
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 }); await sleep(500);
+  assert.match((await card(p))?.line ?? '', /south/, 'after the first fix it says south: ' + JSON.stringify(await card(p)));
+  await p.close(); t('restored quest words its direction after the first fix ok');
+}
+{ // a narrow phone: the Today button and the quest pill share the top row without touching, with a long distance
+  const places = [{ name: 'Far Spot', type: 'cafe', lat: S0.lat + dN(390), lng: S0.lng }];
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 }); await sleep(500);
+  const box = await p.evaluate(() => ({ chip: document.getElementById('chip').getBoundingClientRect().toJSON(), pill: document.getElementById('questBtn').getBoundingClientRect().toJSON(), card: document.getElementById('questCard').getBoundingClientRect().toJSON() }));
+  assert(box.chip.right <= box.pill.left, );
+  assert(box.pill.right <= 320 && box.pill.height >= 44 && box.card.right <= 320 && box.card.left >= 0, 'inside the screen with a finger-sized pill');
+  await shot(p, 'quest-320');
+  await p.close(); t('narrow phone with the quest pill ok');
 }
 
 assert.deepEqual(errors.filter((e) => !/Failed to load|ERR_FAILED/.test(e)), [], 'no page errors: ' + errors.join('; '));

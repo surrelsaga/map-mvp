@@ -1,8 +1,8 @@
 // Part of `npm test`. Today's goal: the date rule, counting WHICH places (so none counts twice), the wording, and the per-device store.
 /// <reference types="node" />
 import assert from 'node:assert';
-import { dayKey, countToday, goalOf, readToday, writeToday, todayStoreKey } from '../src/today.ts';
-import { DAILY_GOAL } from '../src/config.ts';
+import { dayKey, countToday, goalOf, readToday, writeToday, readFound, writeFound, foundStoreKey, todayStoreKey } from '../src/today.ts';
+import { DAILY_GOAL, FOUND_MAX } from '../src/config.ts';
 
 // the local date, zero-padded
 assert.equal(dayKey(new Date(2026, 0, 5)), '2026-01-05');
@@ -35,11 +35,11 @@ assert.equal(countToday(noon, Array.from({ length: 9000 }, (_, i) => `p${i}`)).i
 
 // the goal and its wording: an instruction first, then progress, then done
 assert.equal(DAILY_GOAL, 3, 'the wording below assumes three places a day');
-assert.deepEqual(goalOf(0), { found: 0, target: 3, done: false, progress: 0, label: 'Find 3 places today' });
+assert.deepEqual(goalOf(0), { title: 'Today', found: 0, target: 3, done: false, progress: 0, label: 'Find 3 places today', detail: '0 of 3 new places, 3 to go' });
 assert.equal(goalOf(1).label, '1 of 3 places today');
 assert.equal(goalOf(2).label, '2 of 3 places today');
 assert(Math.abs(goalOf(2).progress - 2 / 3) < 1e-9);
-assert.deepEqual(goalOf(3), { found: 3, target: 3, done: true, progress: 1, label: 'Today’s goal done' });
+assert.deepEqual(goalOf(3), { title: 'Today', found: 3, target: 3, done: true, progress: 1, label: 'Today’s goal done', detail: 'All done. More finds are a bonus.' });
 assert.deepEqual([goalOf(7).done, goalOf(7).progress], [true, 1], 'extra finds stay done and the ring stays full');
 assert.equal(goalOf(1, 5).label, '1 of 5 places today', 'the target is a parameter (a quest can take over the slot)');
 
@@ -60,5 +60,20 @@ assert.equal(readToday('k'), null, 'damaged JSON reads as nothing');
 broken = true;
 assert.equal(readToday('k'), null, 'blocked storage reads as nothing');
 assert.doesNotThrow(() => writeToday('k', day(['x'])), 'and writing to it does not throw');
+
+// ---- the found-on-this-device list
+data.clear(); broken = false;
+assert.equal(foundStoreKey(false), 'fogwalk:found:v1'); assert.equal(foundStoreKey(true), 'fogwalk:found:v1:debug', 'simulated walks keep their own list');
+assert.deepEqual(readFound('f'), [], 'nothing found yet');
+writeFound('f', ['node/1', 'node/2', 'node/1']);
+assert.deepEqual(readFound('f'), ['node/1', 'node/2'], 'saved without duplicates, read back in order');
+for (const junk of ['{{{', 'null', '{}', '{"ids":5}', '{"ids":{"a":1}}']) { data.set('f', junk); assert.deepEqual(readFound('f'), [], 'junk gives nothing: ' + junk); }
+data.set('f', JSON.stringify({ ids: ['ok', 5, null, 'x'.repeat(121), 'also ok'] }));
+assert.deepEqual(readFound('f'), ['ok', 'also ok'], 'only short strings survive');
+writeFound('f', Array.from({ length: FOUND_MAX + 5 }, (_, i) => 'id' + i));
+assert.equal(readFound('f').length, FOUND_MAX, 'capped');
+assert.equal(readFound('f').at(-1), 'id' + (FOUND_MAX + 4), 'and it is the newest that stay');
+broken = true;
+assert.deepEqual(readFound('f'), [], 'blocked storage: nothing'); assert.doesNotThrow(() => writeFound('f', ['a']), 'and writing does not throw');
 
 console.log('ok');
