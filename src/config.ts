@@ -62,6 +62,11 @@ export const CROWD_PX = 22;               // found-place pins closer than this o
 // Gemma writes the quest line (opt-in: the model downloads once from Hugging Face, then runs on the phone's GPU; nothing about you is sent)
 export const GEMMA_MODEL = 'onnx-community/gemma-3-1b-it-ONNX-GQA';   // Gemma 3 1B, ~800 MB. The 270M model (~300 MB) was tried: it mostly copies the prompt's examples
 export const GEMMA_MB = 800;              // the download size the switch shows before it is turned on
+// No WebGPU (iPhones before iOS 26, many Android GPUs, in-app browsers): the smaller Gemma 3 270M runs on the processor (WebAssembly) instead. Slower
+// and plainer, but it works everywhere; the clues are written ahead in the background, so nobody waits for it.
+export const GEMMA_SMALL_REPO = 'ggml-org/gemma-3-270m-it-qat-GGUF';   // Gemma 3 270M, quantization-aware trained, 4-bit GGUF (for llama.cpp)
+export const GEMMA_SMALL_FILE = 'gemma-3-270m-it-qat-Q4_0.gguf';
+export const GEMMA_SMALL_MB = 240;
 export const GEMMA_KEY = 'fogwalk:gemma'; // set once the user has turned Gemma on (it then loads from the browser's cache on every visit)
 export const GEMMA_TRIES = 5;             // answers Gemma may give for one quest line before the plain line stays (about 1 s each)
 export const HERE_M = 100;                // a place found this close to you is "where you are" in the quest line

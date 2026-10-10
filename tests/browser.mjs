@@ -1485,11 +1485,11 @@ let q;
   const sw = () => p.evaluate(() => { const s = document.getElementById('gemmaSwitch'); return { shown: !s.hidden, on: s.getAttribute('aria-checked'), off: s.disabled, note: document.getElementById('gemmaNote').textContent }; });
   const gpu = await p.evaluate(() => !!navigator.gpu);
   assert.deepEqual(await sw(), gpu ? { shown: true, on: 'false', off: false, note: '800 MB download, runs on this phone' }
-    : { shown: true, on: 'false', off: true, note: 'Needs WebGPU, which this browser lacks' }, 'the switch says what turning it on costs');
+    : { shown: true, on: 'false', off: false, note: '240 MB download, a smaller Gemma on this phone’s processor' }, 'the switch says what turning it on costs');
   await shot(p, 'gemma-switch');
   await p.close();
   const none = await open('?debug', (p) => p.evaluateOnNewDocument(() => { Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }); }), QUEST); await sleep(1500);
-  assert.deepEqual(await none.evaluate(() => [document.getElementById('gemmaSwitch').disabled, document.getElementById('gemmaNote').textContent]), [true, 'Needs WebGPU, which this browser lacks'], 'no WebGPU: it says so, and stays off');
+  assert.deepEqual(await none.evaluate(() => [document.getElementById('gemmaSwitch').disabled, document.getElementById('gemmaNote').textContent]), [false, '240 MB download, a smaller Gemma on this phone’s processor'], 'no WebGPU: the smaller Gemma, on the processor, can still be turned on');
   await none.close(); t('Gemma switch ok');
 }
 if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fresh profile): switch it on and the quest line becomes Gemma's, checked and credited
@@ -1577,10 +1577,10 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   const gpu = await (async () => { const p = await open(''); const g = await p.evaluate(() => !!navigator.gpu); await p.close(); return g; })();
   const a = await open1(); await sleep(800); await fix(a); await sleep(500);
   const offer = () => a.evaluate(() => { const b = document.getElementById('questGemma'); return b.hidden ? null : b.textContent.trim(); });
-  assert.equal(await offer(), gpu ? 'Let Gemma write your riddles 800 MB, once · runs on this phone · Wi-Fi recommended' : null, 'the card offers Gemma, with its size, only where it can run');
+  assert.equal(await offer(), `Let Gemma write your riddles ${gpu ? 800 : 240} MB, once · runs on this phone · Wi-Fi recommended`, 'the card offers Gemma, with its size here');
   await a.close();
   const none = await open1((p) => p.evaluateOnNewDocument(() => { Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }); })); await sleep(800); await fix(none); await sleep(500);
-  assert.equal(await none.evaluate(() => document.getElementById('questGemma').hidden), true, 'no WebGPU: no offer');
+  assert.equal(await none.evaluate(() => document.getElementById('questGemmaMb').textContent), '240 MB, once · runs on this phone · Wi-Fi recommended', 'no WebGPU: the smaller one is offered');
   await none.close(); t('Gemma offer in the card ok');
 }
 { // the wisp: help you earn by trying. Not there at the start; out after a while of looking; it points at the spot; close to it, it circles the area

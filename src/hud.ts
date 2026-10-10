@@ -60,13 +60,14 @@ export function showQuest(q: QuestView | null, reveal = false) {
 }
 
 // The Gemma switch in the panel, and the one-tap offer in the quest card. `note` says what it's doing ("800 MB download", "Downloading 40%"); not `usable`: this browser can't run it.
-export function showGemma(on: boolean, note: string, usable = true) {
+export function showGemma(on: boolean, note: string, usable = true, offer = '') {
   const sw = $('gemmaSwitch') as HTMLButtonElement;
   sw.hidden = false; sw.disabled = !usable;
   sw.setAttribute('aria-checked', String(on));
   sw.querySelector('.state')!.textContent = on ? 'On' : 'Off';
   $('gemmaNote').textContent = note;
   $('questGemma').hidden = on || !usable;                              // the card offers it only while it is off and possible
+  if (offer) $('questGemmaMb').textContent = offer;                     // its size here: the GPU model, or the smaller one for the processor
   const pct = /(\d+)%/.exec(note);
   $('questGemmaStatus').hidden = !(on && /^(Downloading|Loading)/.test(note));   // while it loads, the card says so (it is the thing the player pressed)
   $('questGemmaStatus').textContent = pct ? `Gemma is getting ready · ${pct[1]}%` : 'Gemma is getting ready…';
