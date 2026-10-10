@@ -1,9 +1,9 @@
 // Part of `npm test`. The two test quests: picking a target, counting finds, the chip wording, and the per-device store.
 /// <reference types="node" />
 import assert from 'node:assert';
-import { makeQuest, progress, goalOf, parseQuest, distanceTo, track, tooFar, questStoreKey, readQuest, writeQuest, clearQuest, type Quest, type Reach, type Find } from '../src/quests.ts';
+import { makeQuest, progress, goalOf, parseQuest, distanceTo, track, stage, tooFar, questStoreKey, readQuest, writeQuest, clearQuest, type Quest, type Reach, type Find } from '../src/quests.ts';
 import { dist } from '../src/fog.ts';
-import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND, QUEST_REVEAL_MS } from '../src/config.ts';
+import { QUEST_MIN_M, QUEST_MAX_M, QUEST_FIND, QUEST_REVEAL_MS, QUEST_HELP_MS, QUEST_COLD_M, QUEST_CLOSE_M } from '../src/config.ts';
 import type { Place } from '../src/places.ts';
 
 const me = { lat: 1.3413, lng: 103.9638 };
@@ -113,5 +113,27 @@ assert.equal(readQuest('k'), null, 'damaged JSON reads as nothing');
 broken = true;
 assert.equal(readQuest('k'), null, 'blocked storage reads as nothing');
 assert.doesNotThrow(() => { writeQuest('k', q0); clearQuest('k'); }, 'and writing to it does not throw');
+
+// help is earned by trying: time spent looking, going the wrong way, or being close. The wisp and the second clue hang on it.
+{
+  const dN = (m: number) => m / 111195;                                   // metres north, in degrees of latitude
+  const origin = { lat: 1.3413, lng: 103.9638 };
+  const r: Reach = { kind: 'reach', seq: 0, done: false, key: 'k', lat: origin.lat + dN(300), lng: origin.lng, start: 300, t: 1, best: 300, help: false, revealed: false };
+  const at = (m: number) => ({ lat: origin.lat + dN(m), lng: origin.lng });   // you, m metres north of the origin: the target is 300 m north
+  assert.equal(track(r, at(0), 1000).help, false, 'just started: no help');
+  assert.equal(track(r, at(0), QUEST_HELP_MS).help, false, 'not yet');
+  assert.equal(track(r, at(0), 1 + QUEST_HELP_MS).help, true, 'after looking for a while');
+  assert.equal(track({ ...r, t: 0 }, at(0), 10 * QUEST_HELP_MS).help, false, 'a save with no start time has no time to count');
+  assert.equal(track(r, at(100), 1000).help, false, 'getting closer: no help');
+  assert.equal(track({ ...r, best: 200 }, at(100 - QUEST_COLD_M + 5), 1000).help, false, 'a little off the best: no help');
+  assert.equal(track({ ...r, best: 200 }, at(100 - QUEST_COLD_M - 5), 1000).help, true, 'well past your closest: wrong way');
+  assert.equal(track(r, at(300 - QUEST_CLOSE_M + 5), 1000).help, true, 'close: help');
+  assert.equal(track({ ...r, help: true }, at(0), 1000).help, true, 'help is kept once given');
+  // the clue you are on: 1 the riddle, 2 with help, 3 close
+  assert.deepEqual([stage(r, at(0)), stage({ ...r, help: true }, at(0)), stage({ ...r, help: true }, at(300 - QUEST_CLOSE_M)), stage(r, at(300 - QUEST_CLOSE_M))], [1, 2, 3, 3]);
+  // a Phase 9 save (no help): starts at the first clue and earns help like any other; a saved yes stays yes
+  assert.equal((parseQuest({ kind: 'reach', seq: 0, done: false, key: 'k', lat: 1, lng: 2, start: 100 }) as Reach).help, false);
+  assert.equal((parseQuest({ ...r, help: true }) as Reach).help, true);
+}
 
 console.log('ok');

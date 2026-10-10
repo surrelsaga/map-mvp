@@ -12,9 +12,10 @@ L.tileLayer(TILE_URL, {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 
-// Layer order, bottom to top: tiles (200), fog (450), quest spot (470), discovered places (480), player dot (500), popups (700).
+// Layer order, bottom to top: tiles (200), fog (450), quest spot (470), the wisp (475), discovered places (480), player dot (500), popups (700).
 // The quest spot has its own pane, so it looks different from discovered places and sits above the fog that hides its place.
 map.createPane('fog').style.zIndex = '450';
 map.createPane('quest').style.zIndex = '470';
+map.createPane('wisp').style.zIndex = '475';
 map.createPane('places').style.zIndex = '480';
 map.createPane('player').style.zIndex = '500';

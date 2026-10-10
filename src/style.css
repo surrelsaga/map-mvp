@@ -206,7 +206,17 @@ html, body { margin: 0; overflow: hidden; }
 }
 #debug button { pointer-events: auto; margin-left: 6px; font: inherit; color: #c0392b; background: #fff; border: 0; border-radius: 3px; padding: 1px 6px; }
 
+/* the wisp: a pale light with a tail. It drifts a little along its bearing (up, in the turned frame) and fades back; near the spot it pulses over the area. */
+.wisp { pointer-events: none; }
+.wisp-turn { width: 48px; height: 48px; transform-origin: 24px 18px; transition: transform .4s ease-out; }
+.wisp-drift { animation: wisp-drift 2.4s ease-in-out infinite; filter: drop-shadow(0 0 6px rgba(207, 230, 255, 0.7)); }
+.wisp.is-close .wisp-drift { animation: wisp-pulse 1.8s ease-in-out infinite; transform-origin: 24px 18px; }
+@keyframes wisp-drift { 0%, 100% { transform: translateY(0); opacity: 0.8; } 50% { transform: translateY(-9px); opacity: 1; } }
+@keyframes wisp-pulse { 0%, 100% { transform: scale(0.9); opacity: 0.8; } 50% { transform: scale(1.3); opacity: 1; } }
+
 @media (prefers-reduced-motion: reduce) {
+  .wisp-drift, .wisp.is-close .wisp-drift { animation: none; }
+  .wisp-turn { transition: none; }
   #toast { transform: none; transition: opacity .2s; }
   #stats, #questCard { animation: none; }
   .ring-arc, .ring-check, .ring-flag, .bar > span, .track, .thumb { transition: none; }

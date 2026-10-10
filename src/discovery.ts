@@ -122,6 +122,13 @@ function setQuest(q: quests.Quest | null) {
   if (q?.kind === 'reach' && !q.done && q.revealed) questLayer.show(q, () => (quest ? quests.goalOf(quest, pos).label : ''));
   else questLayer.clear();
   showQuest();
+  showWisp();
+}
+
+// The wisp follows you while a reach quest has help (see quests.track); close to the spot it circles the area. No position, no quest, or done: none.
+function showWisp() {
+  const q = quest;
+  questLayer.setWisp(pos && q?.kind === 'reach' && !q.done && q.help ? { me: pos, target: q, close: quests.stage(q, pos) === 3, seq: q.seq } : null);
 }
 
 // Call once Gemma has loaded: the quest already on screen gets its clues.
@@ -218,6 +225,7 @@ export function onMove(fix: Fix) {
   if (!quest) ensureQuest();
   else {
     trackQuest();
+    showWisp();                                                         // it follows you: a step moves it
     if (first) { writeClues(quest); showQuest(); }                       // a quest restored before the first fix had no direction to speak of: word it now
   }
 }

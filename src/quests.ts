@@ -50,7 +50,8 @@ export const distanceTo = (q: Reach, me: LatLng | null) => (me ? dist(me, q) : q
 export function track(q: Reach, me: LatLng | null, now: number): Reach {
   if (q.done) return q;
   const d = distanceTo(q, me), best = Math.min(q.best, d);
-  const help = q.help || now - q.t >= QUEST_HELP_MS || d - best >= QUEST_COLD_M || d <= QUEST_CLOSE_M;
+  const help = q.help || (q.t > 0 && now - q.t >= QUEST_HELP_MS) ||   // (t 0: saved before quests had a start time, so there is no time to count)
+     d - best >= QUEST_COLD_M || d <= QUEST_CLOSE_M;
   const revealed = q.revealed || now - q.t >= QUEST_REVEAL_MS || (best <= q.start - QUEST_PAST_M && d - best >= QUEST_PAST_M);
   return best === q.best && help === q.help && revealed === q.revealed ? q : { ...q, best, help, revealed };
 }
@@ -95,7 +96,7 @@ export function parseQuest(raw: unknown): Quest | null {
       ? {
         ...base, kind: 'reach', key: q.key, lat: q.lat!, lng: q.lng!, start: q.start!,
         t: Number.isFinite(q.t) ? q.t! : 0, best: Number.isFinite(q.best) && q.best! >= 0 ? q.best! : q.start!,
-        help: typeof q.help === 'boolean' ? q.help : true,                       // saved before the wisp existed: it was already helped
+        help: typeof q.help === 'boolean' ? q.help : false,                      // saved before the wisp existed: it starts at the first clue and earns help like any other
         revealed: typeof q.revealed === 'boolean' ? q.revealed : true,           // saved before quests had hints: its spot was already marked
       } : null;
   return null;
