@@ -135,4 +135,15 @@ const fam = (type: string, fame?: 'michelin' | 'wiki') => ({ name: 'X', type, la
 assert.deepEqual([legendOf(fam('restaurant', 'michelin')), legendOf(fam('cafe', 'wiki')), legendOf(fam('attraction', 'wiki')), legendOf(fam('mall', 'wiki')),
   legendOf(fam('school', 'wiki')), legendOf(fam('hospital', 'wiki')), legendOf(fam('restaurant'))], ['legend', 'legend', 'landmark', 'landmark', null, null, null]);
 
+// iconic eateries: matched by name (whole words), food places only
+const iconic = (name: string, type: string) => parsePlaces({ places: [{ name, type, lat: 1, lng: 2 }] })[0];
+assert.equal(iconic('Song Fa', 'restaurant').fame, 'iconic', 'a name on the list');
+assert.equal(iconic('Song Fa Bak Kut Teh (Eu Tong Sen Street)', 'restaurant').fame, 'iconic', 'with more words round it');
+assert.equal(iconic('SONG FA - Bak Kut Teh', 'fast_food').fame, 'iconic', 'case and punctuation do not matter');
+assert.equal(iconic('Song Fang Tailor', 'restaurant').fame, undefined, 'whole words only');
+assert.equal(iconic('Song Fa', 'clothes').fame, undefined, 'a shop with that name is not an eatery');
+assert.equal(iconic('Wee Nam Kee Chicken Rice', 'restaurant').fame, 'iconic');
+assert.equal(legendOf(iconic('Wee Nam Kee Chicken Rice', 'restaurant')), 'legend', 'a famous place to eat: a Local legend');
+assert.equal(parsePlaces({ places: [{ name: 'Song Fa', type: 'restaurant', lat: 1, lng: 2, fame: 'michelin' }] })[0].fame, 'michelin', 'a tagged award wins over the list');
+
 console.log('ok');

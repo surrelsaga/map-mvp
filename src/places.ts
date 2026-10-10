@@ -2,8 +2,9 @@
 import type { LatLng } from './types.ts';
 
 // id = the OpenStreetMap object ("node/123"): stable, so quests can refer to a place.
-// fame = why it is well known: a Michelin award, or its own Wikipedia/Wikidata entry (never a chain's brand entry). Absent for most places.
-export type Fame = 'michelin' | 'wiki';
+// fame = why it is well known: a Michelin award, its own Wikipedia/Wikidata entry (never a chain's brand entry), or being on our list of iconic eateries
+// (`ICONIC`, matched by name when the places load). Absent for most places.
+export type Fame = 'michelin' | 'wiki' | 'iconic';
 export interface Place extends LatLng { name: string; type: string; id?: string; fame?: Fame }
 
 const MAX_NAME = 80;
@@ -13,6 +14,14 @@ const MAX_NAME = 80;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028-\u2029]+/g;
 const INVISIBLE = /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu;
 
+// Iconic eateries we picked: places people would name if asked for "the famous place to eat" in Singapore (hawker stalls, heritage kopitiams, Michelin-listed
+// names). OpenStreetMap rarely says so itself, so this list is the "famous restaurant" signal for a food place: add or remove names freely (lowercase, no punctuation;
+// a name matches when it contains one of these). Only food places are matched, so a shop with the same name is not.
+const ICONIC = ['song fa', 'wee nam kee', 'ya kun kaya toast', 'tian tian hainanese chicken rice', 'hawker chan', 'liao fan', 'jumbo seafood', 'din tai fung', 'chin mee chin',
+  '328 katong laksa', 'tai hwa pork noodle', 'lau pa sat', 'maxwell food centre', 'newton food centre', 'old airport road food centre', 'chomp chomp'];
+const flat = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const isIconic = (name: string, type: string) => groupOf(type) === 'food' && ICONIC.some((k) => ` ${flat(name)} `.includes(` ${k} `));   // whole words: "song fa" is not "song fang"
+
 // The file is ours, but treat it as untrusted: keep only well-formed entries. Names are plain text and must only ever reach the page as text.
 export function parsePlaces(raw: unknown): Place[] {
   const list = (raw as { places?: unknown } | null)?.places;
@@ -21,8 +30,10 @@ export function parsePlaces(raw: unknown): Place[] {
   for (const p of list) {
     const name = typeof p?.name === 'string' ? Array.from(p.name.replace(CONTROL, ' ').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()).slice(0, MAX_NAME).join('') : '';   // Array.from: never cut a character in half
     const { lat, lng } = p ?? {};
-    if (name && typeof p.type === 'string' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180)
-      out.push({ name, type: p.type, lat, lng, ...(typeof p.id === 'string' && { id: p.id.slice(0, 40) }), ...((p.fame === 'michelin' || p.fame === 'wiki') && { fame: p.fame as Fame }) });
+    if (name && typeof p.type === 'string' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      const fame: Fame | undefined = p.fame === 'michelin' || p.fame === 'wiki' ? p.fame : isIconic(name, p.type) ? 'iconic' : undefined;
+      out.push({ name, type: p.type, lat, lng, ...(typeof p.id === 'string' && { id: p.id.slice(0, 40) }), ...(fame && { fame }) });
+    }
   }
   return out;
 }

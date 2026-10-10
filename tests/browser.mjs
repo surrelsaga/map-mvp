@@ -1687,6 +1687,16 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   await shot(p, 'badges-fame');
   await p.close(); t('famous place badges ok');
 }
+{ // an iconic eatery is known by its name (no OpenStreetMap tag needed): being at one earns Local legend
+  const places = [{ name: 'Song Fa Bak Kut Teh', type: 'restaurant', lat: S0.lat, lng: S0.lng }, { name: 'Song Fa Hardware', type: 'hardware', lat: S0.lat + dN(100), lng: S0.lng }];
+  const p = await open('', async (p) => { await captureFix(p); await fakePlaces({ places })(p); }, QUEST); await sleep(800);
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat, longitude: S0.lng, accuracy: 20 });
+  assert(await waitFor(async () => (await p.evaluate(() => document.getElementById('toastDetail').textContent)) === 'Local legend · Song Fa Bak Kut Teh', 6000), 'the iconic eatery is a Local legend: ' + (await toasts(p)).join('|'));
+  await p.evaluate((c) => window.__fix({ coords: c }), { latitude: S0.lat + dN(100), longitude: S0.lng, accuracy: 20 }); await sleep(600);
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('fogwalk:badge:v1')));
+  assert.deepEqual(Object.keys(saved.fame), ['legend'], 'a shop with the same words is not one');
+  await p.close(); t('iconic eatery known by name ok');
+}
 { // a trail: three places of one kind. Only that kind counts; a shop on the way does not
   const place = (name, type, n) => ({ name, type, lat: S0.lat + dN(n), lng: S0.lng });
   const places = [place('Cafe One', 'cafe', 250), place('Shop A', 'clothes', 330), place('Cafe Two', 'cafe', 420), place('Cafe Three', 'cafe', 600), place('Cafe Far', 'cafe', 900)];
