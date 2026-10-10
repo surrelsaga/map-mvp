@@ -94,7 +94,7 @@ function showQuest(reveal = false) {
   const unlocked = shownStage !== stage && shownSeq === quest.seq;      // a new clue of the quest you are on
   const written = quest.clues?.[stage - 1] !== undefined;
   const open = reveal || arrived || unlocked || (quest.seq !== shownSeq && (written || !gemma.isReady()));
-  hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : clueOf(quest, stage), detail: name ? clueOf(quest, 1) : '', byGemma: !!quest.clues?.[stage - 1] && !name && !(quest.kind === 'reach' && quest.legend && stage === 1), legend: quest.kind === 'reach' && quest.legend }, open);
+  hud.showQuest({ goal, short, line: name ? `Found it: ${name}` : clueOf(quest, stage), detail: name ? clueOf(quest, 1) : '', byGemma: !!quest.clues?.[stage - 1] && !name && !(quest.kind === 'reach' && quest.legend && stage === 1), legend: quest.kind === 'reach' && quest.legend, plain: !quest.clues?.[stage - 1] }, open);
   if (open) shownSeq = quest.seq;
   if (arrived) shownDone = quest.seq;
   shownStage = stage;
@@ -103,7 +103,7 @@ function showQuest(reveal = false) {
 // Writes the quest's clues with Gemma, one after another, if it is loaded: all of them at the start, so an unlock never waits for the model. Each is saved as it
 // arrives. Until one answers (or if GEMMA_TRIES answers all fail the checks: '' is saved) the plain line shows.
 function writeClues(q: quests.Quest) {
-  const want = q.kind === 'reach' ? 3 : 1;
+  const want = q.kind === 'reach' ? 3 : q.group ? 0 : 1;               // (a trail's plain line says exactly which kind counts: a model's line could say "any place")
   if (q.done || writing === q.seq || !pos || !gemma.isReady() || (q.clues?.length ?? 0) >= want) return;   // (no model: the plain lines need no writing)
   writing = q.seq;
   (async () => {
@@ -148,7 +148,7 @@ function ensureQuest() {
   if (!questKey || quest || !pos || !placeList.length) return;
   const day = today.dayKey(new Date()), legendOk = lastSeq >= 2 && quests.readLegendDay(questKey) !== day;   // one legend quest a day, never the very first quest: it stays special
   const q = quests.makeQuest(lastSeq + 1, placeList, found, pos, Math.random, Date.now(), legendOk) ?? quests.makeQuest(lastSeq + 2, placeList, found, pos);   // no reach target to be had (all places are right here): a find quest instead of none
-  if (q?.kind === 'reach' && q.legend) { quests.writeLegendDay(questKey, day); q.clues = [questText.LEGEND_LINE]; }   // its first clue is fixed, so it is clear without Gemma
+  if (q?.kind === 'reach' && q.legend) q.clues = [questText.LEGEND_LINE];   // its first clue is fixed, so it is clear without Gemma
   if (q) { warned = false; setQuest(q); }
 }
 
@@ -210,7 +210,10 @@ function check() {
   let questDone = false;
   if (quest) {                                                          // every find goes to the quest: a quiet one can still complete a reach quest
     const next = quests.progress(quest, fresh, news);
-    if (next !== quest) { questDone = next.done; setQuest(next); }
+    if (next !== quest) {
+      questDone = next.done; setQuest(next);
+      if (questDone && next.kind === 'reach' && next.legend) quests.writeLegendDay(questKey, today.dayKey(new Date()));   // the day's legend is spent when it is found, not when it is offered
+    }
   }
   if (news.length) {
     last = news[news.length - 1];
@@ -231,7 +234,7 @@ function check() {
     for (const p of fresh) {                                            // having been at a famous place: the first of each kind is a badge
       const kind = places.legendOf(p);
       const r = kind && badges.awardFame(badgeState, kind, p.name, day);
-      if (r?.fresh) { badgeState = r.badges; announce(`${kind === 'legend' ? 'Local legend' : 'Landmark'} · ${p.name}`); }
+      if (r?.fresh) { badgeState = r.badges; announce(`${badges.FAME_LABEL[kind!]} · ${p.name}`); }
     }
     if (badgeState !== got.badges || got.fresh.length) badges.write(badgeKey, badgeState);
   }

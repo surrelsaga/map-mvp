@@ -6,6 +6,7 @@ import { BADGE_KEY, BADGE_LEVELS } from './config.ts';
 
 export type FameKind = 'legend' | 'landmark';
 export const FAME_KINDS: FameKind[] = ['legend', 'landmark'];
+export const FAME_LABEL: Record<FameKind, string> = { legend: 'Local legend', landmark: 'Landmark' };
 export type Memory = { name: string; day: string };
 // earned: level → the day it was earned ("2026-10-10"); seen: the highest level looked at; fame: the place and day of each famous badge; fameSeen: which of those were looked at
 export interface Badges { earned: Record<string, string>; seen: number; fame: Partial<Record<FameKind, Memory>>; fameSeen: FameKind[] }
@@ -43,7 +44,7 @@ export function parse(raw: unknown): Badges {
   const fame: Badges['fame'] = {}, src = (r as { fame?: Record<string, unknown> }).fame;
   for (const k of FAME_KINDS) {
     const m = src?.[k] as { name?: unknown; day?: unknown } | undefined;
-    if (m && typeof m.name === 'string' && m.name && m.name.length <= 80 && typeof m.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.day)) fame[k] = { name: m.name, day: m.day };
+    if (m && typeof m.name === 'string' && m.name && Array.from(m.name).length <= 80 && typeof m.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.day)) fame[k] = { name: m.name, day: m.day };
   }
   const seenFame = (r as { fameSeen?: unknown }).fameSeen;
   const fameSeen = Array.isArray(seenFame) ? FAME_KINDS.filter((k) => seenFame.includes(k) && fame[k]) : [];

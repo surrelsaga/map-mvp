@@ -162,12 +162,16 @@ assert.doesNotThrow(() => { writeQuest('k', q0); clearQuest('k'); }, 'and writin
   const l = makeQuest(0, [famous, plain], none, me, () => 0, 0, true) as Reach;
   assert.deepEqual([l.kind, l.key, l.legend], ['reach', 'Famous Noodles', true], 'a famous place within reach: a legend quest');
   assert.equal((makeQuest(0, [famous, plain], none, me, () => 0, 0, false) as Reach).key, 'Plain', 'not offered today: an ordinary reach quest');
+  assert.equal((makeQuest(0, [{ ...famous, ...at('Next Door Famous', 100) }, plain], none, me, () => 0, 0, true) as Reach).legend, false, 'a famous place just round the corner is no journey');
+  assert.equal((makeQuest(0, [famous, { ...famous, ...at('Other Famous', 800) }], none, me, () => 0.99, 0, true) as Reach).key, 'Famous Noodles', 'picked among the famous places in range, not always the nearest');
   assert.equal((makeQuest(0, [{ ...famous, fame: undefined }, plain], none, me, () => 0, 0, true) as Reach).legend, false, 'without fame, no legend');
   assert.equal((makeQuest(0, [at('Far Famous', 1800), plain].map((p, i) => (i ? p : { ...p, fame: 'wiki' as const, type: 'attraction' })), none, me, () => 0, 0, true) as Reach).legend, false, 'beyond LEGEND_MAX_M: no');
   assert.equal(makeQuest(0, [{ ...at('St School', 1000), fame: 'wiki', type: 'school' }, plain], none, me, () => 0, 0, true) !== null && (makeQuest(0, [{ ...at('St School', 1000), fame: 'wiki', type: 'school' }, plain], none, me, () => 0, 0, true) as Reach).legend, false, 'a school with an encyclopedia entry is no legend');
   const now = 10 * QUEST_REVEAL_MS;
   assert.equal(track({ ...l, t: 1 }, me, now).revealed, false, 'a legend is not marked on the map when you are slow: it is found by walking');
   assert.equal(track({ ...l, legend: false, t: 1 }, me, now).revealed, true, 'an ordinary reach quest is');
+  const walkedPast = { ...l, t: Date.now(), best: l.start - 70 };                   // got 70 m closer...
+  assert.equal(track(walkedPast, { lat: l.lat - 0.0005, lng: l.lng }, Date.now()).revealed, false, '...then drifted back out: still not marked for a legend');
   assert.equal((parseQuest({ ...l }) as Reach).legend, true);
   assert.equal((parseQuest({ ...l, legend: undefined }) as Reach).legend, false, 'a save from before: not a legend');
 }

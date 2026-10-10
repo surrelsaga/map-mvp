@@ -1080,7 +1080,7 @@ console.log('Phase 7: regions');
   };
   const fixAt = (p, lat, lng) => p.setGeolocation({ latitude: lat, longitude: lng, accuracy: 25 });
   const total = (p) => stats(p).then((s) => s.places);
-  const REGIONS = 'fogwalk:regions:v1';
+  const REGIONS = 'fogwalk:regions:v2';
   const q = (u) => ({ lat: Number(u.searchParams.get('lat')), lng: Number(u.searchParams.get('lng')) });
 
   // first open in Tokyo: one request, with a rounded centre; places from the service; the map goes there; no "New area" for the first region
@@ -1241,7 +1241,7 @@ console.log('Phase 7.1: the same behaviour wherever you are');
   assert(await waitFor(async () => empties.length === 1));
   await sleep(300);
   assert.equal(await total(p), '0 places found', 'an empty region');
-  assert.equal(await ls(p, 'fogwalk:regions:v1'), null, 'is not kept on the phone');
+  assert.equal(await ls(p, 'fogwalk:regions:v2'), null, 'is not kept on the phone');
   await sleep(900); await fixAt(p, 35.6763, 139.6503);
   assert(await waitFor(async () => (await total(p)) === '0 of 1 places found'), 'asked again, and the places arrive: ' + await total(p));
   assert.equal(empties.length, 2);
@@ -1718,9 +1718,13 @@ if (process.env.GEMMA) { // the real Gemma (GEMMA=1; an ~800 MB download on a fr
   assert.deepEqual([q.kind, q.legend, q.key.startsWith('Famous Noodles')], ['reach', true, true], 'the famous place, 1 km away, is the quest');
   assert.equal(await p.evaluate(() => document.getElementById('questBtn').hasAttribute('data-legend')), true, 'its pill has the star');
   assert.deepEqual(await p.evaluate(() => [document.getElementById('questLine').textContent, document.getElementById('questBy').hidden]), ['A local legend is hiding nearby. Can you find it?', true], 'a fixed first line, clear without Gemma');
-  const day = await p.evaluate(() => localStorage.getItem('fogwalk:quest:legend'));
-  assert.match(day, /^\d{4}-\d{2}-\d{2}$/, 'today is remembered');
+  assert.equal(await p.evaluate(() => localStorage.getItem('fogwalk:quest:legend')), null, 'the day is spent when the legend is found, not when it is offered');
+  await p.setViewport({ width: 320, height: 640, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); await sleep(300);
+  const box = await p.evaluate(() => ({ chip: document.getElementById('chip').getBoundingClientRect().toJSON(), pill: document.getElementById('questBtn').getBoundingClientRect().toJSON() }));
+  assert(box.chip.right <= box.pill.left && box.pill.right <= 320, 'the pill with its star fits beside the Today button at 320 px: ' + JSON.stringify(box));
+  assert.equal(await p.evaluate(() => document.getElementById('questBasic').hidden), true, 'a fixed line is not a "basic hint"');
   await p.close();
+  const day = new Date().toLocaleDateString('en-CA');                    // today, as the app writes it (YYYY-MM-DD, the phone's own date)
   // the same day, the next reach quest is an ordinary one
   const ctx = await browser.createBrowserContext(); await ctx.overridePermissions(ORIGIN, ['geolocation']);
   const one = await open('', async (p) => { await setup({ kind: 'find', seq: 2, done: true, need: 2, ids: [] })(p); await p.evaluateOnNewDocument((d) => localStorage.setItem('fogwalk:quest:legend', d), day); }, { ...QUEST, ctx }); await sleep(800); await fix(one); await sleep(500);

@@ -9,7 +9,7 @@ import type { LatLng } from './types.ts';
 // A find quest has one line, with the kinds of place still hidden nearby so Gemma has something real to point at.
 export type Stage = 1 | 2 | 3;
 // `legend`: the target is a famous place (stage 2 and 3 say so). `words`: a trail's kind of place, in plain words ("shops"): all the finds must be of that kind.
-export type Facts = { kind: 'reach'; what: string; hidden: string; stage: Stage; near: string | null; legend?: boolean } | { kind: 'find'; need: number; kinds: string[]; words?: string };
+export type Facts = { kind: 'reach'; what: string; hidden: string; stage: Stage; near: string | null; legend?: boolean } | { kind: 'find'; need: number; kinds: string[]; words?: string };   // a trail has no Gemma line: its plain line says exactly what counts
 
 // The bearing from `a` to `b` in degrees clockwise from north (0..360). Flat-earth maths is plenty over a few hundred metres.
 export function bearing(a: LatLng, b: LatLng) {
@@ -21,7 +21,7 @@ const an = (w: string) => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w;
 const newPlaces = (n: number) => (n === 1 ? 'one new place' : `${n} new places`);
 
 const ask = (f: Facts) => {
-  if (f.kind === 'find') return f.words ? `Find ${f.need} ${f.words}, a trail.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}` : `Uncover ${newPlaces(f.need)}.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}`;
+  if (f.kind === 'find') return `Uncover ${newPlaces(f.need)}.${f.kinds.length ? ` Still hidden nearby: ${f.kinds.join(', ')}.` : ''}`;
   const place = f.hidden ? `${f.hidden} (${f.what})` : `${an(f.what)}`;
   if (f.stage === 1) return `Hidden place: ${place}. Give the first riddle.`;
   if (f.stage === 2) return `Hidden place: ${place}.${f.legend ? ' It is famous around here.' : ''}${f.near ? ` It is not far from ${f.near}.` : ''} The player is stuck. Give a sharper clue.`;

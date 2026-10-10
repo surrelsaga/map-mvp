@@ -20,7 +20,6 @@ export type Quest = Reach | Find;
 const MAX_NEED = 50;                                              // bounds what a damaged stored value can cost
 const MAX_TEXT = 200, MAX_CLUES = 3;
 
-// The next quest, or null when there is nothing left to find. `found` holds indexes into `places`; `me` is where you are now.
 // The kind with the most places still hidden within TRAIL_R of you, if it has TRAIL_NEED of them; null otherwise. Food wins a tie.
 function trailGroup(open: Place[], me: LatLng): TrailGroup | null {
   const n: Record<TrailGroup, number> = { food: 0, shop: 0, outdoors: 0 };
@@ -29,7 +28,8 @@ function trailGroup(open: Place[], me: LatLng): TrailGroup | null {
   return n[best] >= TRAIL_NEED ? best : null;
 }
 
-// `legendOk`: a legend quest may be offered now (the caller allows one a day). `legend` below picks the nearest famous place within LEGEND_MAX_M.
+// The next quest, or null when there is nothing left to find. `found` holds indexes into `places`; `me` is where you are now.
+// `legendOk`: a legend quest may be offered now (the caller allows one a day): a famous place between QUEST_MIN_M and LEGEND_MAX_M away, picked at random.
 export function makeQuest(seq: number, places: Place[], found: Set<number>, me: LatLng, rng: () => number = Math.random, now = Date.now(), legendOk = false): Quest | null {
   const open = places.filter((_, i) => !found.has(i));
   if (!open.length) return null;
@@ -40,7 +40,8 @@ export function makeQuest(seq: number, places: Place[], found: Set<number>, me: 
   if (seq % 3) return { kind: 'find', seq, done: false, need: Math.min(QUEST_FIND, open.length), ids: [] };
   const far = open.map((p) => ({ p, d: dist(me, p) })).filter(({ d }) => d >= REVEAL_RADIUS + 20);   // a place you're standing next to is found by the next step, so it is no quest
   if (!far.length) return null;
-  const famous = legendOk ? far.filter(({ p, d }) => legendOf(p) && d <= LEGEND_MAX_M).sort((a, b) => a.d - b.d)[0] : undefined;
+  const legends = legendOk ? far.filter(({ p, d }) => legendOf(p) && d >= QUEST_MIN_M && d <= LEGEND_MAX_M).sort((a, b) => a.d - b.d) : [];   // a famous place right here is no journey
+  const famous = legends[Math.floor(rng() * legends.length)];
   if (famous) return { kind: 'reach', seq, done: false, key: placeKey(famous.p), lat: famous.p.lat, lng: famous.p.lng, start: famous.d, t: now, best: famous.d, help: false, revealed: false, legend: true };
   const band = far.filter(({ d }) => d >= QUEST_MIN_M && d <= QUEST_MAX_M);
   const pick = band.length ? band[Math.floor(rng() * band.length)] : far.reduce((a, b) => (b.d < a.d ? b : a));   // ponytail: nearest unfound place when none sits in the band
@@ -72,7 +73,7 @@ export function track(q: Reach, me: LatLng | null, now: number): Reach {
   const d = distanceTo(q, me), best = Math.min(q.best, d);
   const help = q.help || (q.t > 0 && now - q.t >= QUEST_HELP_MS) ||   // (t 0: saved before quests had a start time, so there is no time to count)
      d - best >= QUEST_COLD_M || d <= QUEST_CLOSE_M;
-  const revealed = q.revealed || (!q.legend && now - q.t >= QUEST_REVEAL_MS) || (best <= q.start - QUEST_PAST_M && d - best >= QUEST_PAST_M);
+  const revealed = q.revealed || (!q.legend && (now - q.t >= QUEST_REVEAL_MS || (best <= q.start - QUEST_PAST_M && d - best >= QUEST_PAST_M)));   // a legend is never marked for you
   return best === q.best && help === q.help && revealed === q.revealed ? q : { ...q, best, help, revealed };
 }
 

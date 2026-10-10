@@ -4,6 +4,7 @@ import { GROUP_LABELS, ICONS, discHtml } from './icons.ts';
 import { typeLabel, type Group, type Place } from './places.ts';
 import type { Goal } from './today.ts';
 import { BADGE_LEVELS } from './config.ts';
+import { FAME_LABEL, type Badges } from './badges.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 const GROUPS: Group[] = ['food', 'shop', 'outdoors', 'other'];
@@ -41,7 +42,8 @@ export function showGoal(goal: Goal) {
 // The quest pill (top right, with the quest's own ring) and its card: the line (Gemma's, or the plain one), then the detail.
 // `short` is what the pill says (a distance, "1/2", "Done"). null hides both. `reveal` opens the card, for a quest that has just started: not over another card,
 // and not while the first-open bubble is up (the pill shows; the card opens on a tap).
-export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean; legend: boolean }
+// byGemma: the line is Gemma's; plain: it is the plain fallback (a fixed line, like a legend's first, is neither)
+export interface QuestView { goal: Goal; short: string; line: string; detail: string; byGemma: boolean; legend: boolean; plain: boolean }
 export function showQuest(q: QuestView | null, reveal = false) {
   $('questBtn').hidden = !q;
   if (!q) { if (open === 'quest') openCard(null); return; }
@@ -52,7 +54,7 @@ export function showQuest(q: QuestView | null, reveal = false) {
   $('questLine').textContent = q.line;
   $('questDetail').textContent = q.detail;
   $('questBy').hidden = !q.byGemma;
-  basicLine = !q.byGemma && !q.goal.done; syncBasic();                  // plain line: say so, when there is something better to turn on
+  basicLine = q.plain && !q.goal.done; syncBasic();                  // plain line: say so, when there is something better to turn on
   $('questCard').dataset.done = String(q.goal.done);                    // a celebrating card has no Gemma offer (CSS)
   if (reveal && (open === null || open === 'quest') && !hintOpen) openCard('quest');   // never over another card someone is reading
 }
@@ -77,7 +79,7 @@ const syncBasic = () => { $('questBasic').hidden = !basicLine || $('questGemma')
 // The badge button (bottom left) and its card: Explorer with a disc per level (gold and dated once earned, "7 of 10" while it is next), then Local legend and
 // Landmark: one each, earned at a famous place (its name and the day).
 // `hasNew`: a level earned that has not been looked at yet (a dot on the button).
-export interface BadgeView { count: number; earned: Record<string, string>; fame: Partial<Record<'legend' | 'landmark', { name: string; day: string }>>; hasNew: boolean }
+export interface BadgeView { count: number; earned: Record<string, string>; fame: Badges['fame']; hasNew: boolean }
 const niceDay = (d: string) => { const [y, m, day] = d.split('-').map(Number); return new Date(y, m - 1, day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
 export function showBadges({ count, earned, fame, hasNew }: BadgeView) {
   const have = BADGE_LEVELS.filter((l) => String(l) in earned).length + Object.keys(fame).length, all = BADGE_LEVELS.length + 2;
@@ -107,8 +109,8 @@ export function showBadges({ count, earned, fame, hasNew }: BadgeView) {
   });
   const legend = fame.legend, landmark = fame.landmark;
   $('badgeLevels').replaceChildren(...levels,
-    row(icon('food'), 'Local legend', legend ? `${legend.name} · ${niceDay(legend.day)}` : 'Be at a famous place to eat', !!legend),
-    row(icon('outdoors'), 'Landmark', landmark ? `${landmark.name} · ${niceDay(landmark.day)}` : 'Be at a famous landmark', !!landmark));
+    row(icon('food'), FAME_LABEL.legend, legend ? `${legend.name} · ${niceDay(legend.day)}` : 'Be at a famous place to eat', !!legend),
+    row(icon('outdoors'), FAME_LABEL.landmark, landmark ? `${landmark.name} · ${niceDay(landmark.day)}` : 'Be at a famous landmark', !!landmark));
 }
 
 // At most one card is open: the panel under the button, the quest card under the pill, or the badges.

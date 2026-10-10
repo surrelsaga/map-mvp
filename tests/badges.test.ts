@@ -25,6 +25,8 @@ assert.deepEqual([again2.fresh, again2.badges === f.badges], [false, true], 'the
 assert.equal(hasNew(f.badges), true, 'a famous badge is new until looked at');
 assert.equal(hasNew(seenAll(f.badges)), false, 'looking clears the dot');
 assert.deepEqual(parse(JSON.parse(JSON.stringify(f.badges))), f.badges, 'it survives a round trip');
+const longName = '𝒜'.repeat(80);   // 80 characters, 160 UTF-16 units: as long as a name can be
+assert.equal(parse({ fame: { legend: { name: longName, day: '2026-10-10' } } }).fame.legend?.name, longName, 'a name of 80 characters is kept, however many units they take');
 assert.deepEqual(parse({ fame: { legend: { name: '', day: '2026-10-10' }, landmark: { name: 'X', day: 'soon' }, other: { name: 'Y', day: '2026-10-10' } }, fameSeen: ['legend', 'landmark'] }), empty(), 'a name and a real day, and only known kinds');
 
 // the dot: a level earned that was not looked at

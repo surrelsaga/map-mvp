@@ -29,7 +29,7 @@ export const REANCHOR_M = 1500;           // walk further than this from the reg
 export const REGION_KEEP = 3;             // regions kept on the phone, most recent first
 export const REGION_RETRY_MS = 60_000;    // after a failed load, wait this long before asking again
 export const REGION_MAX_CHARS = 1_000_000;   // stored regions never take more than this of localStorage's ~5 MB (some browsers count 2 bytes per character), so the fog (fogwalk:v1) always has room; one dense city centre (~0.85 MB) still fits
-export const REGION_KEY = 'fogwalk:regions:v1';   // the kept regions; debug mode adds ':debug'
+export const REGION_KEY = 'fogwalk:regions:v2';   // the kept regions; debug mode adds ':debug'. v2: places carry `fame` (v1 regions have none, and are never re-fetched, so they are let go)
 export const PLACES_TIMEOUT_MS = 150_000;   // a places-service request that takes longer is a failure (the service may try three Overpass servers in turn, 45 s each)
 export const PLACES_RETRY_MS = [1500, 4000];   // pauses before retrying places.json after a network or server error (a missing file, 4xx, is final)
 
