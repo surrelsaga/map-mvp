@@ -31,14 +31,15 @@ export function addPlace(p: Place, fresh = false) {
 
 // Pins that would sit on top of each other (closer than CROWD_PX on screen) are a crowd: only the newest find in each shows, so the map
 // stays readable. Zooming in spreads them out and brings the rest back. Screen distances only change with zoom, not with panning.
-// ponytail: compares every pin with every kept pin (283 places: instant); a grid bucket if the place list grows into the thousands
+// ponytail: compares every pin with every kept pin (hundreds of places: instant); a grid bucket if a region's finds grow into the thousands
 function declutter() {
   const kept: L.Point[] = [];
   for (const m of [...markers.values()].reverse()) {
     const at = map.latLngToLayerPoint(m.getLatLng());
     const crowded = kept.some((k) => k.distanceTo(at) < CROWD_PX);
     if (!crowded) kept.push(at);
-    m.getElement()!.style.display = crowded ? 'none' : '';
+    const el = m.getElement();
+    if (el) el.style.display = crowded ? 'none' : '';
   }
 }
 let queued = false;
@@ -48,6 +49,12 @@ function queueDeclutter() {                                              // once
   queueMicrotask(() => { queued = false; declutter(); });
 }
 map.on('zoomend', declutter);
+
+// Takes every pin off the map (the region changed: its places are not the ones on screen any more).
+export function clear() {
+  markers.forEach((m) => m.remove());
+  markers.clear();
+}
 
 // Brings a found place into view and opens its name, as if it had been tapped. Returns whether the map moved to do it.
 // The name opens only once the map has arrived: a popup opened mid-pan would pan the map again to fit itself and stop it short.
