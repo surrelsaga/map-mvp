@@ -2,7 +2,7 @@
 // The app never calls Overpass itself: server/places.ts and tools/fetch-places.mjs do, and both use this one copy.
 // Data (c) OpenStreetMap contributors, ODbL (https://www.openstreetmap.org/copyright).
 import { dist } from './fog.ts';
-import type { Place } from './places.ts';
+import type { Fame, Place } from './places.ts';
 import type { LatLng } from './types.ts';
 
 const KINDS = ['amenity', 'shop', 'leisure', 'tourism', 'historic'];
@@ -19,6 +19,10 @@ const HEADERS = { 'content-type': 'application/x-www-form-urlencoded', accept: '
 export const overpassQuery = (c: LatLng, radius: number) =>
   `[out:json][timeout:40];(${KINDS.map((k) => `nwr["name"]["${k}"](around:${radius},${c.lat},${c.lng});`).join('')});out center tags;`;
 
+// Why a place is well known, from its own tags: a Michelin award (stars, Bib Gourmand or selected), or its own Wikipedia/Wikidata entry. `brand:wikidata` is the
+// chain's entry (every outlet has it), so it is not fame.
+const fameOf = (t: Record<string, string>): Fame | undefined => (t['award:michelin'] ? 'michelin' : t.wikidata || t.wikipedia ? 'wiki' : undefined);
+
 interface Element { type: string; id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }
 
 // Overpass elements -> places: named, one of the five kinds, not street furniture, inside the circle, same name within ~100 m merged.
@@ -26,7 +30,7 @@ export function placesFromElements(elements: Element[], centre: LatLng, radius: 
   // Visit in a fixed order (nodes before building outlines, then lowest id), so when two entries merge the same one always wins, whatever order Overpass answers in.
   const order: Record<string, number> = { node: 0, way: 1, relation: 2 };
   const sorted = [...elements].sort((a, b) => order[a.type] - order[b.type] || a.id - b.id);
-  const seen = new Set<string>();
+  const seen = new Map<string, Place>();
   const places: Place[] = [];
   for (const el of sorted) {
     const tags = el.tags ?? {};
@@ -37,9 +41,12 @@ export function placesFromElements(elements: Element[], centre: LatLng, radius: 
     if (dist(centre, { lat, lng }) > radius) continue;                           // a big place's centre can fall just outside the circle
     const bucket = `${name}|${lat.toFixed(3)}|${lng.toFixed(3)}`;                // same name within ~100 m is one place (a node and its building outline, or several bus stops)
     // ponytail: a rounded grid, not a true radius: two same-name shops in one bucket merge, and one place can straddle a boundary. Cluster properly if that shows up.
-    if (seen.has(bucket)) continue;
-    seen.add(bucket);
-    places.push({ id: `${el.type}/${el.id}`, name, type: tags[kind], lat: +lat.toFixed(6), lng: +lng.toFixed(6) });   // id = the OpenStreetMap object, stable across re-fetches (quests refer to it)
+    const fame = fameOf(tags);
+    const twin = seen.get(bucket);
+    if (twin) { if (fame && !twin.fame) twin.fame = fame; continue; }          // the building outline may carry the Wikipedia entry, the shop node not
+    const place: Place = { id: `${el.type}/${el.id}`, name, type: tags[kind], lat: +lat.toFixed(6), lng: +lng.toFixed(6), ...(fame && { fame }) };   // id = the OpenStreetMap object, stable across re-fetches (quests refer to it)
+    seen.set(bucket, place);
+    places.push(place);
   }
   return places.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id! < b.id! ? -1 : 1));   // plain comparison: the same order on every machine, so re-fetches diff cleanly
 }

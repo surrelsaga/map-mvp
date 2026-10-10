@@ -1,7 +1,10 @@
 // Places to discover (from OpenStreetMap, shipped as public/places.json). Pure logic: no DOM, no Leaflet, so Node can test it.
 import type { LatLng } from './types.ts';
 
-export interface Place extends LatLng { name: string; type: string; id?: string }   // id = the OpenStreetMap object ("node/123"): stable, so quests can refer to a place
+// id = the OpenStreetMap object ("node/123"): stable, so quests can refer to a place.
+// fame = why it is well known: a Michelin award, or its own Wikipedia/Wikidata entry (never a chain's brand entry). Absent for most places.
+export type Fame = 'michelin' | 'wiki';
+export interface Place extends LatLng { name: string; type: string; id?: string; fame?: Fame }
 
 const MAX_NAME = 80;
 // Control characters become a space ("A\nB" stays two words). Invisible formatting characters are dropped: direction marks and overrides
@@ -19,7 +22,7 @@ export function parsePlaces(raw: unknown): Place[] {
     const name = typeof p?.name === 'string' ? Array.from(p.name.replace(CONTROL, ' ').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()).slice(0, MAX_NAME).join('') : '';   // Array.from: never cut a character in half
     const { lat, lng } = p ?? {};
     if (name && typeof p.type === 'string' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180)
-      out.push({ name, type: p.type, lat, lng, ...(typeof p.id === 'string' && { id: p.id.slice(0, 40) }) });
+      out.push({ name, type: p.type, lat, lng, ...(typeof p.id === 'string' && { id: p.id.slice(0, 40) }), ...((p.fame === 'michelin' || p.fame === 'wiki') && { fame: p.fame as Fame }) });
   }
   return out;
 }

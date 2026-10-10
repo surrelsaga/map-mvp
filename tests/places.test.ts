@@ -125,4 +125,9 @@ assert(some.food.found >= 1 && some.shop.found >= 1, 'food and shop each got the
 assert.equal(some.food.total, all.food.total, 'totals do not change with what is found');
 assert.equal(file.center.lat, SUTD[0]); assert.equal(file.center.lng, SUTD[1]); assert.equal(file.radius, AREA_RADIUS);   // the fetch script and config agree
 
+// fame: only the two known values survive (the file is untrusted)
+assert.deepEqual(parsePlaces({ places: [
+  { name: 'A', type: 'restaurant', lat: 1, lng: 2, fame: 'michelin' }, { name: 'B', type: 'park', lat: 1, lng: 2, fame: 'wiki' },
+  { name: 'C', type: 'cafe', lat: 1, lng: 2, fame: 'best ever' }, { name: 'D', type: 'cafe', lat: 1, lng: 2 }] }).map((p) => p.fame), ['michelin', 'wiki', undefined, undefined]);
+
 console.log('ok');

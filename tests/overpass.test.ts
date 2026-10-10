@@ -25,6 +25,12 @@ assert(ids.includes('node/8'), 'a car park that is also an attraction is an attr
 assert(ids.includes('node/3') && !ids.includes('way/4'), 'a shop and its building outline merge, and the node wins');
 assert(ids.includes('node/13') && ids.includes('node/14'), 'two places with one name far apart stay two');
 assert.equal(expected.find((p: { id: string }) => p.id === 'node/12').name, 'Padded', 'names are trimmed');
+const byId = (id: string) => expected.find((p: { id: string }) => p.id === id);
+assert.equal(byId('node/15').fame, 'michelin', 'a Michelin award is fame');
+assert.equal(byId('node/16').fame, 'wiki', 'a place with its own Wikidata entry is fame');
+assert.equal(byId('node/17').fame, undefined, "a chain's brand:wikidata is not the place's own entry");
+assert.equal(byId('node/18').fame, 'wiki', 'the building outline carries the Wikipedia entry, and the merged place keeps it');
+assert.equal(byId('node/1').fame, undefined, 'most places have none');
 assert.deepEqual(placesFromElements([], centre, AREA_RADIUS), [], 'no elements, no places');
 assert.deepEqual(placesFromElements([{ type: 'node', id: 1, lat: 1, lon: 1 }], centre, AREA_RADIUS), [], 'an element with no tags is ignored, not a crash');
 
